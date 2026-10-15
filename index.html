@@ -1,12 +1,57 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CINE Studio</title>
-  </head>
-  <body class="bg-slate-950 text-slate-100">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CINE Studio | #1 AI Studio on the Planet</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen">
+
+    <!-- Header -->
+    <header class="border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <div class="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl text-white font-black">
+                    ✨
+                </div>
+                <div>
+                    <span class="font-bold text-lg bg-gradient-to-r from-purple-400 via-pink-400 to-red-400 bg-clip-text text-transparent">
+                        CINE Studio
+                    </span>
+                    <span class="ml-2 text-xs text-purple-400 font-semibold px-2 py-0.5 bg-purple-500/10 border border-purple-500/20 rounded-full">
+                        #1 AI Studio
+                    </span>
+                </div>
+            </div>
+            <button onclick="launchStudio()" class="text-xs font-semibold text-slate-300 hover:text-white border border-slate-700 px-4 py-2 rounded-xl bg-slate-900">
+                Skip to Canvas →
+            </button>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="max-w-5xl mx-auto px-6 pt-12 pb-8 text-center space-y-6">
+        <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-pink-500/10 border border-pink-500/20 text-pink-400 text-xs font-semibold">
+            ✨ The Most Powerful & Simple AI Studio on the Planet
+        </div>
+        <h1 class="text-4xl md:text-6xl font-black tracking-tight text-white leading-tight">
+            Make Hit Songs & Movies <br />
+            <span class="bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent">
+                In 3 Simple Steps
+            </span>
+        </h1>
+        <p class="text-slate-400 max-w-2xl mx-auto text-sm md:text-base leading-relaxed">
+            So easy a 4th grader can create a full cinematic movie in minutes. No complex software, no learning curve—just pure creativity.
+        </p>
+    </section>
+
+    <!-- Interactive Selection Buttons -->
+    <section class="max-w-5xl mx-auto px-6 py-8">
+        <div class="text-center mb-8">
+            <h2 class="text-xl font-bold text-white">What do you want to build today?</h2>
+            <p class="text-slate-400 text-xs mt-1">Select an option below to start your creation</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="goal-grid">
+            <button onclick="selectGoal('music', 'Make Just Music')" id="btn-music" class="goal-btn p-5 rounded-2xl border border-slate-800 bg-slate-900/60
