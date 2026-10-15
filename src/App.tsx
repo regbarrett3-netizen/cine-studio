@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Music, Video, Film, Disc, Sparkles, ArrowRight, Play, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
   const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
@@ -9,30 +8,26 @@ export default function App() {
     {
       id: 'music',
       title: 'Make Just Music',
-      icon: Music,
-      color: 'from-purple-500 to-indigo-500',
-      desc: 'Generate beat loops, stems, and full 808 audio tracks in seconds.'
+      desc: 'Generate beat loops, stems, and full 808 audio tracks in seconds.',
+      color: 'from-purple-500 to-indigo-500'
     },
     {
       id: 'music-video',
       title: 'Music + Music Video',
-      icon: Disc,
-      color: 'from-pink-500 to-rose-500',
-      desc: 'Sync dynamic visuals and video clips directly to your song.'
+      desc: 'Sync dynamic visuals and video clips directly to your song.',
+      color: 'from-pink-500 to-rose-500'
     },
     {
       id: 'movie-sfx',
       title: 'Movie + Sound Effects',
-      icon: Video,
-      color: 'from-amber-500 to-orange-500',
-      desc: 'Build cinematic film scenes packed with realistic background SFX.'
+      desc: 'Build cinematic film scenes packed with realistic background SFX.',
+      color: 'from-amber-500 to-orange-500'
     },
     {
       id: 'full-movie',
       title: 'Movie + SFX + Soundtrack',
-      icon: Film,
-      color: 'from-emerald-500 to-teal-500',
-      desc: 'The complete Hollywood package: dialogue, SFX, and custom score.'
+      desc: 'The complete Hollywood package: dialogue, SFX, and custom score.',
+      color: 'from-emerald-500 to-teal-500'
     }
   ];
 
@@ -41,9 +36,9 @@ export default function App() {
       <div className="min-h-screen bg-slate-950 text-white p-6 flex flex-col items-center justify-center">
         <div className="max-w-xl text-center space-y-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
-            <CheckCircle2 className="w-4 h-4" /> Mode Active: {projectGoals.find(g => g.id === selectedGoal)?.title}
+            ✓ Mode Active: {projectGoals.find(g => g.id === selectedGoal)?.title || 'Custom Project'}
           </div>
-          <h1 className="text-3xl font-bold">Welcome to your CINE Studio Canvas</h1>
+          <h1 className="text-3xl font-bold">Welcome to CINE Studio</h1>
           <p className="text-slate-400 text-sm">Your workspace is calibrated and ready. Add your first scene to begin.</p>
           <button 
             onClick={() => setShowWorkspace(false)}
@@ -63,7 +58,9 @@ export default function App() {
         <div className="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
           <div className="flex items-center gap-2">
             <div className="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl">
-              <Sparkles className="w-5 h-5 text-white" />
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+              </svg>
             </div>
             <div>
               <span className="font-bold text-lg bg-gradient-to-r from-purple-400 via-pink-400 to-red-400 bg-clip-text text-transparent">
@@ -86,7 +83,7 @@ export default function App() {
       {/* Hero Section */}
       <section className="max-w-5xl mx-auto px-6 pt-12 pb-8 text-center space-y-6">
         <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-pink-500/10 border border-pink-500/20 text-pink-400 text-xs font-semibold">
-          <Sparkles className="w-3.5 h-3.5" /> The Most Powerful & Simple AI Studio on the Planet
+          ✨ The Most Powerful & Simple AI Studio on the Planet
         </div>
         <h1 className="text-4xl md:text-6xl font-black tracking-tight text-white leading-tight">
           Make Hit Songs & Movies <br />
@@ -108,7 +105,6 @@ export default function App() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {projectGoals.map((goal) => {
-            const Icon = goal.icon;
             const isSelected = selectedGoal === goal.id;
             return (
               <button
@@ -120,16 +116,16 @@ export default function App() {
                     : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
                 }`}
               >
-                <div className={`p-3 rounded-xl bg-gradient-to-br ${goal.color} text-white`}>
-                  <Icon className="w-6 h-6" />
+                <div className={`p-3 rounded-xl bg-gradient-to-br ${goal.color} text-white font-bold text-lg`}>
+                  {goal.id === 'music' ? '🎵' : goal.id === 'music-video' ? '💿' : goal.id === 'movie-sfx' ? '🎬' : '🎥'}
                 </div>
                 <div className="space-y-1 pr-6">
                   <h3 className="font-bold text-white text-base">{goal.title}</h3>
                   <p className="text-slate-400 text-xs leading-relaxed">{goal.desc}</p>
                 </div>
                 {isSelected && (
-                  <div className="absolute top-4 right-4 text-pink-400">
-                    <CheckCircle2 className="w-5 h-5" />
+                  <div className="absolute top-4 right-4 text-pink-400 font-bold">
+                    ✓
                   </div>
                 )}
               </button>
@@ -149,7 +145,7 @@ export default function App() {
             }`}
           >
             <span>{selectedGoal ? 'Open My Studio Canvas' : 'Pick a goal above to start'}</span>
-            <ArrowRight className="w-4 h-4" />
+            <span>→</span>
           </button>
         </div>
       </section>
@@ -174,4 +170,19 @@ export default function App() {
             <span className="text-3xl font-black text-pink-500/40">02</span>
             <h3 className="font-bold text-white text-base">Press Generate</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Our AI automatically builds your stems, synthes
+              Our AI automatically builds your stems, synthesizes sound effects, and crafts high-definition video clips.
+            </p>
+          </div>
+
+          <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-2xl space-y-3 relative">
+            <span className="text-3xl font-black text-red-500/40">03</span>
+            <h3 className="font-bold text-white text-base">Export & Share</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Watch your finished scene or music video right away, download in 4K, and share it with the world!
+            </p>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
