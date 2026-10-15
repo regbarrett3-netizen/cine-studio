@@ -1,9 +1,9 @@
 // src/App.tsx
 import React, { useState } from 'react';
-import { TimelineCanvas } from './components/timeline/TimelineCanvas';
-import { ApiKeyPanel } from './components/settings/ApiKeyPanel';
-import { useBillingStore } from './store/billingStore';
-import { MediaTrack } from './types/timeline';
+import { TimelineCanvas } from '../components/timeline/TimelineCanvas';
+import { ApiKeyPanel } from '../components/settings/ApiKeyPanel';
+import { useBillingStore } from '../store/billingStore';
+import { MediaTrack } from '../types/timeline';
 
 export default function App() {
   const { credits } = useBillingStore();
