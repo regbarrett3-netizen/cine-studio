@@ -1,13 +1,53 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CINE Studio</title>
-  </head>
-  <body class="bg-slate-950 text-slate-100">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CINE Studio Suite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen p-6 font-sans">
+    <div class="max-w-4xl mx-auto space-y-6">
+        <header class="flex justify-between items-center border-b border-slate-800 pb-4">
+            <div>
+                <h1 class="text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent">
+                    CINE Studio Suite
+                </h1>
+                <p class="text-xs text-slate-400">AI Audio, Music Video & Film Production</p>
+            </div>
+            <span class="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-semibold flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                System Live
+            </span>
+        </header>
+
+        <main class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-3">
+                <h2 class="font-bold text-lg text-purple-400">1. Audio Engine</h2>
+                <p class="text-xs text-slate-400">Generative stem isolation and 808 multi-track arrangement.</p>
+                <div class="p-3 bg-slate-950 rounded-lg border border-slate-800 text-xs text-slate-300">
+                    Status: Ready
+                </div>
+            </div>
+
+            <div class="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-3">
+                <h2 class="font-bold text-lg text-pink-400">2. Timeline Canvas</h2>
+                <p class="text-xs text-slate-400">Multimodal video sync and sequence editor.</p>
+                <div class="p-3 bg-slate-950 rounded-lg border border-slate-800 text-xs text-slate-300">
+                    Tracks: Active
+                </div>
+            </div>
+
+            <div class="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-3">
+                <h2 class="font-bold text-lg text-indigo-400">3. Render & Export</h2>
+                <p class="text-xs text-slate-400">Final audio-visual synchronization and master delivery.</p>
+                <div class="p-3 bg-slate-950 rounded-lg border border-slate-800 text-xs text-slate-300">
+                    Export Target: 4K / MP4
+                </div>
+            </div>
+        </main>
+    </div>
+</body>
 </html>
+
 
