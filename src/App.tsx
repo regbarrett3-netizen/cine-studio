@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
+import Workspace from './Workspace';
 
 export default function App() {
   const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
   const [showWorkspace, setShowWorkspace] = useState(false);
+if (showWorkspace) return <Workspace mode={selectedGoal ?? 'custom'} modeLabel={({ music: 'Make Just Music', 'music-video': 'Music + Music Video', 'movie-sfx': 'Movie + Sound Effects', 'full-movie': 'Movie + SFX + Soundtrack' } as Record<string, string>)[selectedGoal ?? ''] || 'Custom Project'} onBack={() => setShowWorkspace(false)} />;
+
 
   const projectGoals = [
     {
