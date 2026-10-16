@@ -35,26 +35,6 @@ if (showWorkspace) return <Workspace mode={selectedGoal ?? 'custom'} modeLabel={
     }
   ];
 
-  if (showWorkspace) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-white p-6 flex flex-col items-center justify-center">
-        <div className="max-w-xl text-center space-y-4">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
-            ✓ Mode Active: {projectGoals.find(g => g.id === selectedGoal)?.title || 'Custom Project'}
-          </div>
-          <h1 className="text-3xl font-bold">Welcome to CINE Studio</h1>
-          <p className="text-slate-400 text-sm">Your workspace is calibrated and ready. Add your first scene to begin.</p>
-          <button 
-            onClick={() => setShowWorkspace(false)}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold"
-          >
-            ← Back to Landing Page
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
       {/* Top Banner */}
