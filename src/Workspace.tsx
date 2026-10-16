@@ -73,9 +73,41 @@ function loadTracks(mode: string): Track[] {
 }
 
 function fmt(t: number): string {
-  const m = Math.floor(t / 60);
-  const s = t - m * 60;
+  // Round to tenths first so 59.96s becomes 1:00.0 instead of 0:60.0
+  const tenths = Math.round(Math.max(0, t) * 10);
+  const m = Math.floor(tenths / 600);
+  const s = (tenths - m * 600) / 10;
   return `${m}:${s.toFixed(1).padStart(4, '0')}`;
+}
+
+interface NumberFieldProps {
+  value: number;
+  min: number;
+  step: number;
+  onCommit: (n: number) => void;
+  className?: string;
+}
+
+// Keeps what the person is typing in a draft so the field can be emptied and
+// retyped; valid numbers are committed immediately, and the field snaps back
+// to the stored (clamped) value on blur.
+function NumberField({ value, min, step, onCommit, className }: NumberFieldProps) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      type="number"
+      min={min}
+      step={step}
+      value={draft ?? String(value)}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        const n = parseFloat(e.target.value);
+        if (Number.isFinite(n)) onCommit(n);
+      }}
+      onBlur={() => setDraft(null)}
+      className={className}
+    />
+  );
 }
 
 type Drag =
@@ -158,8 +190,12 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
     const w = Math.round(duration * pps);
     const h = RULER_H + tracks.length * ROW_H;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
+    // Only resize when the size actually changes: assigning width/height
+    // reallocates the bitmap, which is very costly to do every playback frame.
+    const pw = Math.round(w * dpr);
+    const ph = Math.round(h * dpr);
+    if (canvas.width !== pw) canvas.width = pw;
+    if (canvas.height !== ph) canvas.height = ph;
     canvas.style.width = `${w}px`;
     canvas.style.height = `${h}px`;
     const ctx = canvas.getContext('2d');
@@ -389,7 +425,10 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
       return;
     }
     const endAt = contentEnd > 0 ? contentEnd : duration;
-    if (timeRef.current >= endAt) setTime(0);
+    if (timeRef.current >= endAt) {
+      setTime(0);
+      if (scrollRef.current) scrollRef.current.scrollLeft = 0;
+    }
     setPlaying(true);
   };
 
@@ -520,25 +559,21 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
               </label>
               <label className="text-xs text-slate-400">
                 Start (sec)
-                <input
-                  type="number"
+                <NumberField
                   min={0}
                   step={0.1}
                   value={selClip.start}
-                  onChange={(e) => updateClip(selClip.id, { start: Math.max(0, Number(e.target.value) || 0) })}
+                  onCommit={(n) => updateClip(selClip.id, { start: Math.max(0, n) })}
                   className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white"
                 />
               </label>
               <label className="text-xs text-slate-400">
                 Length (sec)
-                <input
-                  type="number"
+                <NumberField
                   min={0.5}
                   step={0.5}
                   value={selClip.duration}
-                  onChange={(e) =>
-                    updateClip(selClip.id, { duration: Math.max(0.5, Number(e.target.value) || 0.5) })
-                  }
+                  onCommit={(n) => updateClip(selClip.id, { duration: Math.max(0.5, n) })}
                   className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white"
                 />
               </label>
