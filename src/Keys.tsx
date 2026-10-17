@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { AudioClip } from './mixEngine';
-import { decodeBlob, encodeWav } from './mixEngine';
+import { decodeBlob, encodeWav, wakeAudio } from './mixEngine';
 import {
   CHORDS,
   FAMILY_LIST,
@@ -661,8 +661,7 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
         const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
         ctx = new AC();
         // iPhones: play even when the side switch is on silent
-        const nav = navigator as Navigator & { audioSession?: { type: string } };
-        if (nav.audioSession) nav.audioSession.type = 'playback';
+        void wakeAudio(ctx);
         const bus = ctx.createGain();
         const dry = ctx.createGain();
         const conv = ctx.createConvolver();
@@ -707,7 +706,7 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
         return null;
       }
     }
-    if (ctx.state === 'suspended') void ctx.resume();
+    if (ctx.state !== 'running') void wakeAudio(ctx);
     return ctx;
   };
 
