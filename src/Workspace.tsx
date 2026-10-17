@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
+import BeatBox from './BeatBox';
 import Editor, { addClipToProject, readProjectClips } from './Editor';
 import type { NewClip, ProjectClip } from './Editor';
 
@@ -14,7 +15,7 @@ interface Choice {
   emoji: string;
   title: string;
   hint: string;
-  action: 'prompt' | 'upload' | 'beatbox';
+  action: 'prompt' | 'upload' | 'beatbox' | 'record';
   kind: Kind; // what is being made: music, a video scene, or a sound effect
   track?: string; // preferred track name on the timeline
 }
@@ -56,9 +57,27 @@ const beatBox = (track?: string): Choice => ({
   id: 'beatbox',
   emoji: '🥁',
   title: 'BeatBox',
-  hint: 'Tap the squares to build a drum beat.',
+  hint: 'Play 9 drums or pick from 20 beats.',
   action: 'beatbox',
   kind: 'music',
+  track,
+});
+const recordMic = (track?: string): Choice => ({
+  id: 'record-music',
+  emoji: '🎤',
+  title: 'Record with my mic',
+  hint: 'Sing, rap or play live on your phone.',
+  action: 'record',
+  kind: 'music',
+  track,
+});
+const recordSound = (track?: string): Choice => ({
+  id: 'record-sfx',
+  emoji: '🎤',
+  title: 'Record a sound',
+  hint: 'Use your mic to catch a real sound.',
+  action: 'record',
+  kind: 'sfx',
   track,
 });
 const aiScene = (track?: string): Choice => ({
@@ -102,13 +121,13 @@ const MODES: Record<string, ModeConfig> = {
   music: {
     heading: "Let's make music!",
     intro: 'Tap a big button to start. You can try more than one.',
-    sections: [{ choices: [aiMusic(), ownSong(), beatBox()] }],
+    sections: [{ choices: [aiMusic(), ownSong(), beatBox(), recordMic()] }],
   },
   'music-video': {
     heading: "Let's make a music video!",
     intro: 'Start with your song. Then add your video.',
     sections: [
-      { title: 'Step 1: Get your song', choices: [aiMusic('Song'), ownSong('Song'), beatBox('Song')] },
+      { title: 'Step 1: Get your song', choices: [aiMusic('Song'), ownSong('Song'), beatBox('Song'), recordMic('Song')] },
       { title: 'Step 2: Add your video', choices: [aiScene('Visuals'), ownVideo('Visuals')] },
     ],
   },
@@ -117,7 +136,7 @@ const MODES: Record<string, ModeConfig> = {
     intro: 'Make your scenes first. Then add sound effects.',
     sections: [
       { title: 'Step 1: Make your scenes', choices: [aiScene('Scenes'), ownVideo('Scenes')] },
-      { title: 'Step 2: Add sound effects', choices: [aiSound('Sound FX'), ownSound('Sound FX')] },
+      { title: 'Step 2: Add sound effects', choices: [aiSound('Sound FX'), ownSound('Sound FX'), recordSound('Sound FX')] },
     ],
   },
   'full-movie': {
@@ -125,15 +144,15 @@ const MODES: Record<string, ModeConfig> = {
     intro: 'Make your scenes, add sound effects, then add your soundtrack.',
     sections: [
       { title: 'Step 1: Make your scenes', choices: [aiScene('Scenes'), ownVideo('Scenes')] },
-      { title: 'Step 2: Add sound effects', choices: [aiSound('Sound FX'), ownSound('Sound FX')] },
-      { title: 'Step 3: Add your soundtrack', choices: [aiMusic('Soundtrack'), ownSong('Soundtrack'), beatBox('Soundtrack')] },
+      { title: 'Step 2: Add sound effects', choices: [aiSound('Sound FX'), ownSound('Sound FX'), recordSound('Sound FX')] },
+      { title: 'Step 3: Add your soundtrack', choices: [aiMusic('Soundtrack'), ownSong('Soundtrack'), beatBox('Soundtrack'), recordMic('Soundtrack')] },
     ],
   },
   custom: {
     heading: "Let's make something!",
     intro: 'Tap a big button to start. You can try more than one.',
     sections: [
-      { title: 'Make some sound', choices: [aiMusic(), ownSong(), beatBox()] },
+      { title: 'Make some sound', choices: [aiMusic(), ownSong(), beatBox(), recordMic()] },
       { title: 'Make some pictures', choices: [aiScene(), ownVideo()] },
     ],
   },
@@ -547,322 +566,377 @@ function UploadStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
 }
 
 /* ------------------------------------------------------------------ */
-/* BeatBox: a tap-the-squares drum machine                             */
+/* Record live with the phone microphone                               */
 /* ------------------------------------------------------------------ */
 
-const STEPS = 8;
-const BEAT_STORAGE_KEY = 'cine-beat-pattern';
+const MAX_REC_SECONDS = 600;
+const REC_TYPES = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
 
-interface BeatRow {
-  id: 'boom' | 'clap' | 'tick' | 'ding';
-  label: string;
-  emoji: string;
-  on: string;
-  chance: number; // chance a square is on in "Surprise me"
+function pickRecType(): string {
+  if (typeof MediaRecorder === 'undefined') return '';
+  return REC_TYPES.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
 }
 
-const BEAT_ROWS: BeatRow[] = [
-  { id: 'boom', label: 'Boom', emoji: '🥁', on: 'bg-pink-500 border-pink-300', chance: 0.3 },
-  { id: 'clap', label: 'Clap', emoji: '👏', on: 'bg-amber-400 border-amber-200', chance: 0.25 },
-  { id: 'tick', label: 'Tick', emoji: '⏱️', on: 'bg-sky-400 border-sky-200', chance: 0.5 },
-  { id: 'ding', label: 'Ding', emoji: '🔔', on: 'bg-emerald-400 border-emerald-200', chance: 0.15 },
-];
+const extOf = (mime: string) => (mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : mime.includes('webm') ? 'webm' : 'audio');
 
-const TEMPOS = [
-  { label: 'Slow', bpm: 90 },
-  { label: 'Medium', bpm: 115 },
-  { label: 'Fast', bpm: 140 },
-];
+const clock = (secs: number) => {
+  const s = Math.max(0, Math.floor(secs));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
 
-type Pattern = boolean[][];
-
-const STARTER: number[][] = [
-  [1, 0, 0, 0, 1, 0, 0, 0],
-  [0, 0, 1, 0, 0, 0, 1, 0],
-  [1, 0, 1, 0, 1, 0, 1, 0],
-  [0, 0, 0, 0, 0, 0, 0, 0],
-];
-
-const starterPattern = (): Pattern => STARTER.map((row) => row.map((v) => v === 1));
-
-function loadPattern(): Pattern {
-  try {
-    const raw = window.localStorage.getItem(BEAT_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as unknown;
-      if (
-        Array.isArray(parsed) &&
-        parsed.length === BEAT_ROWS.length &&
-        parsed.every((row) => Array.isArray(row) && row.length === STEPS && row.every((v) => typeof v === 'boolean'))
-      ) {
-        return parsed as Pattern;
-      }
-    }
-  } catch {
-    // fall through to the starter beat
-  }
-  return starterPattern();
+interface Take {
+  url: string;
+  secs: number;
+  ext: string;
 }
 
-function makeNoise(ctx: AudioContext): AudioBuffer {
-  const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.5), ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-  return buffer;
-}
-
-function playSound(ctx: AudioContext, noise: AudioBuffer, id: BeatRow['id'], when: number): void {
-  const out = ctx.createGain();
-  out.gain.value = 0.9;
-  out.connect(ctx.destination);
-
-  if (id === 'boom') {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(160, when);
-    osc.frequency.exponentialRampToValueAtTime(40, when + 0.15);
-    gain.gain.setValueAtTime(1, when);
-    gain.gain.exponentialRampToValueAtTime(0.001, when + 0.35);
-    osc.connect(gain);
-    gain.connect(out);
-    osc.start(when);
-    osc.stop(when + 0.4);
-  } else if (id === 'ding') {
-    [880, 1760].forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, when);
-      gain.gain.setValueAtTime(i === 0 ? 0.5 : 0.18, when);
-      gain.gain.exponentialRampToValueAtTime(0.001, when + 0.6);
-      osc.connect(gain);
-      gain.connect(out);
-      osc.start(when);
-      osc.stop(when + 0.65);
-    });
-  } else {
-    // clap and tick are short bursts of filtered noise
-    const src = ctx.createBufferSource();
-    const filter = ctx.createBiquadFilter();
-    const gain = ctx.createGain();
-    src.buffer = noise;
-    if (id === 'clap') {
-      filter.type = 'bandpass';
-      filter.frequency.value = 1800;
-      filter.Q.value = 0.8;
-      gain.gain.setValueAtTime(0.9, when);
-      gain.gain.exponentialRampToValueAtTime(0.001, when + 0.18);
-    } else {
-      filter.type = 'highpass';
-      filter.frequency.value = 6500;
-      gain.gain.setValueAtTime(0.5, when);
-      gain.gain.exponentialRampToValueAtTime(0.001, when + 0.06);
-    }
-    src.connect(filter);
-    filter.connect(gain);
-    gain.connect(out);
-    src.start(when);
-    src.stop(when + 0.25);
-  }
-}
-
-function BeatBoxStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
-  const [pattern, setPattern] = useState<Pattern>(loadPattern);
-  const [tempoIdx, setTempoIdx] = useState(1);
-  const [playing, setPlaying] = useState(false);
-  const [activeStep, setActiveStep] = useState(-1);
+function RecordStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
+  const noun = choice.kind === 'sfx' ? 'sound' : 'recording';
+  const [phase, setPhase] = useState<'idle' | 'asking' | 'counting' | 'recording' | 'review'>('idle');
+  const [error, setError] = useState('');
+  const [count, setCount] = useState(3);
+  const [seconds, setSeconds] = useState(0);
+  const [level, setLevel] = useState(0);
+  const [heard, setHeard] = useState(true);
+  const [take, setTake] = useState<Take | null>(null);
   const [added, setAdded] = useState(false);
+  const [countIn, setCountIn] = useState(true);
+  const [cleanup, setCleanup] = useState(false);
 
+  const streamRef = useRef<MediaStream | null>(null);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const ctxRef = useRef<AudioContext | null>(null);
-  const noiseRef = useRef<AudioBuffer | null>(null);
-  const timerRef = useRef<number | undefined>(undefined);
-  const playingRef = useRef(false);
-  const nextTimeRef = useRef(0);
-  const stepRef = useRef(0);
-  const patternRef = useRef(pattern);
-  const bpmRef = useRef(TEMPOS[1].bpm);
-  patternRef.current = pattern;
-  bpmRef.current = TEMPOS[tempoIdx].bpm;
+  const rafRef = useRef(0);
+  const tickRef = useRef<number | null>(null);
+  const startRef = useRef(0);
+  const peakRef = useRef(0);
+  const urlRef = useRef<string | null>(null);
+  const typeRef = useRef('');
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(BEAT_STORAGE_KEY, JSON.stringify(pattern));
-    } catch {
-      // ignore
-    }
-  }, [pattern]);
-
-  const ensureAudio = (): { ctx: AudioContext; noise: AudioBuffer } => {
-    if (!ctxRef.current) {
-      const Ctor =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      ctxRef.current = new Ctor();
-      noiseRef.current = makeNoise(ctxRef.current);
-    }
-    if (ctxRef.current.state === 'suspended') void ctxRef.current.resume();
-    return { ctx: ctxRef.current, noise: noiseRef.current as AudioBuffer };
-  };
-
-  const stop = () => {
-    window.clearInterval(timerRef.current);
-    playingRef.current = false;
-    setPlaying(false);
-    setActiveStep(-1);
-  };
-
-  const start = () => {
-    const { ctx, noise } = ensureAudio();
-    nextTimeRef.current = ctx.currentTime + 0.05;
-    stepRef.current = 0;
-    playingRef.current = true;
-    setPlaying(true);
-    timerRef.current = window.setInterval(() => {
-      while (nextTimeRef.current < ctx.currentTime + 0.15) {
-        const step = stepRef.current;
-        const when = nextTimeRef.current;
-        BEAT_ROWS.forEach((row, r) => {
-          if (patternRef.current[r][step]) playSound(ctx, noise, row.id, when);
-        });
-        window.setTimeout(() => {
-          if (playingRef.current) setActiveStep(step);
-        }, Math.max(0, (when - ctx.currentTime) * 1000));
-        nextTimeRef.current += 60 / bpmRef.current / 2;
-        stepRef.current = (step + 1) % STEPS;
-      }
-    }, 25);
+  const releaseMic = () => {
+    if (tickRef.current !== null) window.clearInterval(tickRef.current);
+    tickRef.current = null;
+    cancelAnimationFrame(rafRef.current);
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    ctxRef.current?.close().catch(() => undefined);
+    ctxRef.current = null;
+    setLevel(0);
   };
 
   useEffect(
     () => () => {
-      window.clearInterval(timerRef.current);
-      playingRef.current = false;
-      void ctxRef.current?.close();
-      ctxRef.current = null;
+      const rec = recRef.current;
+      if (rec) {
+        rec.onstop = null;
+        if (rec.state !== 'inactive') {
+          try {
+            rec.stop();
+          } catch {
+            /* already stopped */
+          }
+        }
+      }
+      releaseMic();
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     },
     [],
   );
 
-  const hear = (id: BeatRow['id']) => {
-    const { ctx, noise } = ensureAudio();
-    playSound(ctx, noise, id, ctx.currentTime);
+  const finish = () => {
+    const secs = (Date.now() - startRef.current) / 1000;
+    const mime = recRef.current?.mimeType || typeRef.current || 'audio/webm';
+    const blob = new Blob(chunksRef.current, { type: mime });
+    chunksRef.current = [];
+    releaseMic();
+    if (blob.size === 0) {
+      setError('Nothing was recorded. Try again.');
+      setPhase('idle');
+      return;
+    }
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    const url = URL.createObjectURL(blob);
+    urlRef.current = url;
+    setTake({ url, secs, ext: extOf(mime) });
+    setPhase('review');
   };
 
-  const toggle = (r: number, i: number) => {
-    const turningOn = !pattern[r][i];
-    setPattern((prev) => prev.map((row, ri) => (ri === r ? row.map((v, vi) => (vi === i ? !v : v)) : row)));
-    if (turningOn) hear(BEAT_ROWS[r].id);
+  const beginRecording = () => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    try {
+      typeRef.current = pickRecType();
+      const rec = new MediaRecorder(stream, typeRef.current ? { mimeType: typeRef.current } : undefined);
+      recRef.current = rec;
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      rec.onstop = finish;
+      rec.onerror = () => {
+        setError('Recording stopped by accident. Try again.');
+        releaseMic();
+        setPhase('idle');
+      };
+      rec.start(1000);
+    } catch {
+      releaseMic();
+      setError('This phone could not start recording. Try Safari or Chrome.');
+      setPhase('idle');
+      return;
+    }
+    startRef.current = Date.now();
+    peakRef.current = 0;
+    setSeconds(0);
+    setHeard(true);
+    setPhase('recording');
+    tickRef.current = window.setInterval(() => {
+      const s = (Date.now() - startRef.current) / 1000;
+      setSeconds(s);
+      if (s > 2.5 && peakRef.current < 0.02) setHeard(false);
+      else setHeard(true);
+      if (s >= MAX_REC_SECONDS) stopRecording();
+    }, 250);
   };
 
-  const surprise = () => {
-    setPattern(BEAT_ROWS.map((row) => Array.from({ length: STEPS }, () => Math.random() < row.chance)));
+  const startMeter = (stream: MediaStream) => {
+    try {
+      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AC();
+      ctxRef.current = ctx;
+      void ctx.resume();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      const buf = new Uint8Array(analyser.fftSize);
+      const draw = () => {
+        analyser.getByteTimeDomainData(buf);
+        let peak = 0;
+        for (let i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i] - 128) / 128);
+        peakRef.current = Math.max(peakRef.current, peak);
+        setLevel((prev) => Math.max(peak, prev * 0.85));
+        rafRef.current = requestAnimationFrame(draw);
+      };
+      draw();
+    } catch {
+      /* the meter is only a nicety, recording still works without it */
+    }
   };
 
-  const clear = () => setPattern(BEAT_ROWS.map(() => Array<boolean>(STEPS).fill(false)));
+  const start = async () => {
+    if (phase !== 'idle') return;
+    setError('');
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setError('This browser cannot record. Try Safari or Chrome on your phone.');
+      return;
+    }
+    setPhase('asking');
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: cleanup, noiseSuppression: cleanup, autoGainControl: cleanup },
+      });
+    } catch (e) {
+      const name = e instanceof DOMException ? e.name : '';
+      setError(
+        name === 'NotAllowedError' || name === 'SecurityError'
+          ? 'The microphone is turned off for this page. Allow the microphone in your browser settings, then try again.'
+          : name === 'NotFoundError'
+            ? 'No microphone was found on this device.'
+            : 'The microphone is busy or not working. Close other apps that use it, then try again.',
+      );
+      setPhase('idle');
+      return;
+    }
+    streamRef.current = stream;
+    startMeter(stream);
+    if (!countIn) {
+      beginRecording();
+      return;
+    }
+    let n = 3;
+    setCount(n);
+    setPhase('counting');
+    tickRef.current = window.setInterval(() => {
+      n -= 1;
+      if (n <= 0) {
+        if (tickRef.current !== null) window.clearInterval(tickRef.current);
+        tickRef.current = null;
+        beginRecording();
+      } else {
+        setCount(n);
+      }
+    }, 1000);
+  };
 
-  const hasSquares = pattern.some((row) => row.some(Boolean));
+  const cancelCountdown = () => {
+    releaseMic();
+    setPhase('idle');
+  };
 
-  const addIt = () => {
-    if (!hasSquares) return;
-    stop();
-    onAdd({ name: 'My beat', type: 'audio', duration: 8, track: choice.track, from: choice.id });
+  const stopRecording = () => {
+    if (tickRef.current !== null) window.clearInterval(tickRef.current);
+    tickRef.current = null;
+    const rec = recRef.current;
+    if (rec && rec.state !== 'inactive') rec.stop();
+  };
+
+  const again = () => {
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    urlRef.current = null;
+    setTake(null);
+    setAdded(false);
+    setError('');
+    setPhase('idle');
+  };
+
+  const useIt = () => {
+    if (!take) return;
+    onAdd({
+      name: shorten(`My ${noun}`),
+      type: 'audio',
+      duration: Math.max(1, Math.min(take.secs, MAX_CLIP_SECONDS)),
+      track: choice.track,
+      from: choice.id,
+    });
     setAdded(true);
   };
 
+  const saveLink = take ? (
+    <a
+      href={take.url}
+      download={`my-${noun}.${take.ext}`}
+      className={`${BTN_SECONDARY} flex min-h-[56px] items-center justify-center text-lg`}
+    >
+      ⬇ Save to my phone
+    </a>
+  ) : null;
+
+  const toggleClass = (on: boolean) =>
+    `flex min-h-[56px] w-full items-center justify-between gap-3 rounded-xl border px-4 text-left text-base font-semibold ${FOCUS} ${
+      on ? 'border-pink-500 bg-pink-500/10 text-white' : 'border-slate-700 bg-slate-900 text-slate-200'
+    }`;
+
   return (
     <Screen
-      title="Make your beat!"
-      subtitle="Tap the squares to turn sounds on. Then press Play to hear your beat."
+      title={choice.kind === 'sfx' ? 'Record a sound!' : 'Record live!'}
+      subtitle="Sing, rap, play an instrument, or catch a real sound with your phone's microphone. It stays on your phone and is not sent anywhere."
       modeLabel={modeLabel}
       onBack={() => {
-        stop();
+        releaseMic();
         onHome();
       }}
       backLabel="← Back to my project"
     >
-      {added ? (
-        <DonePanel
-          message="Your beat is on your timeline."
-          againLabel="Keep making my beat"
-          onAgain={() => setAdded(false)}
-          onHome={onHome}
-        />
-      ) : (
+      {error ? (
+        <p role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200">
+          {error}
+        </p>
+      ) : null}
+
+      {phase === 'idle' || phase === 'asking' ? (
         <>
           <button
             type="button"
-            onClick={playing ? stop : start}
-            className={`w-full min-h-[64px] rounded-2xl text-xl font-bold ${FOCUS} ${
-              playing ? 'bg-rose-600 hover:bg-rose-500 text-white' : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
+            onClick={start}
+            disabled={phase === 'asking'}
+            className={`flex min-h-[96px] w-full items-center justify-center gap-3 rounded-2xl bg-rose-600 text-2xl font-black text-white shadow-lg shadow-rose-600/30 hover:bg-rose-500 ${FOCUS} ${
+              phase === 'asking' ? 'opacity-70' : ''
             }`}
           >
-            {playing ? '■ Stop' : '▶ Play my beat'}
+            <span aria-hidden="true">🎤</span>
+            {phase === 'asking' ? 'Tap Allow if your phone asks…' : 'Start recording'}
           </button>
-
-          <div className="space-y-4">
-            {BEAT_ROWS.map((row, r) => (
-              <div key={row.id} className="space-y-1.5">
-                <button
-                  type="button"
-                  onClick={() => hear(row.id)}
-                  className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-3 text-base font-bold ${FOCUS}`}
-                >
-                  <span aria-hidden="true">{row.emoji}</span>
-                  {row.label}
-                  <span className="text-xs font-normal text-slate-400">tap to hear</span>
-                </button>
-                <div className="grid grid-cols-8 gap-1">
-                  {pattern[r].map((on, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      aria-pressed={on}
-                      aria-label={`${row.label}, square ${i + 1}`}
-                      onClick={() => toggle(r, i)}
-                      className={`h-14 rounded-lg border-2 ${FOCUS} ${
-                        on ? row.on : 'bg-slate-900 border-slate-700'
-                      } ${activeStep === i ? (on ? 'brightness-150 border-white' : 'bg-slate-600 border-white') : ''}`}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-base font-bold">How fast?</p>
-            <div className="grid grid-cols-3 gap-2">
-              {TEMPOS.map((t, i) => (
-                <button
-                  key={t.label}
-                  type="button"
-                  aria-pressed={tempoIdx === i}
-                  onClick={() => setTempoIdx(i)}
-                  className={`min-h-[52px] rounded-xl text-base font-bold ${FOCUS} ${
-                    tempoIdx === i ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <button type="button" onClick={surprise} className={`${BTN_SECONDARY} min-h-[56px] text-lg`}>
-              🎲 Surprise me
+          <div className="space-y-3">
+            <button type="button" aria-pressed={countIn} onClick={() => setCountIn((v) => !v)} className={toggleClass(countIn)}>
+              <span>⏱️ Count me in (3, 2, 1)</span>
+              <span className="font-bold">{countIn ? 'On' : 'Off'}</span>
             </button>
-            <button type="button" onClick={clear} className={`${BTN_SECONDARY} min-h-[56px] text-lg`}>
-              🧹 Clear
+            <button type="button" aria-pressed={cleanup} onClick={() => setCleanup((v) => !v)} className={toggleClass(cleanup)}>
+              <span>
+                🧼 Clean up background noise
+                <span className="block text-sm font-normal text-slate-400">Good for talking. Turn it off for singing and music.</span>
+              </span>
+              <span className="font-bold">{cleanup ? 'On' : 'Off'}</span>
             </button>
           </div>
-
-          <button type="button" onClick={addIt} disabled={!hasSquares} className={hasSquares ? BTN_PRIMARY : BTN_DISABLED}>
-            {hasSquares ? '✓ Add my beat to my project' : 'Tap some squares first'}
-          </button>
+          <p className="text-slate-400">Tip: find a quiet spot and hold your phone close.</p>
         </>
-      )}
+      ) : null}
+
+      {phase === 'counting' ? (
+        <div role="status" aria-live="assertive" className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-6 text-center">
+          <p className="text-xl font-bold">Get ready…</p>
+          <p className="text-8xl font-black text-pink-400">{count}</p>
+          <button type="button" onClick={cancelCountdown} className={`${BTN_SECONDARY} min-h-[56px] text-lg`}>
+            Cancel
+          </button>
+        </div>
+      ) : null}
+
+      {phase === 'recording' ? (
+        <div className="space-y-4 rounded-2xl border border-rose-500/40 bg-slate-900 p-5 text-center">
+          <p role="status" className="flex items-center justify-center gap-2 text-xl font-black text-rose-400">
+            <span aria-hidden="true" className="inline-block h-4 w-4 animate-pulse rounded-full bg-rose-500" />
+            Recording
+          </p>
+          <p className="text-6xl font-black tabular-nums" aria-label={`${clock(seconds)} recorded`}>
+            {clock(seconds)}
+          </p>
+          <div aria-hidden="true" className="h-6 w-full overflow-hidden rounded-full bg-slate-800">
+            <div
+              className={`h-full rounded-full ${level > 0.9 ? 'bg-rose-500' : level > 0.6 ? 'bg-amber-400' : 'bg-emerald-400'}`}
+              style={{ width: `${Math.min(100, Math.round(level * 100))}%` }}
+            />
+          </div>
+          {!heard ? (
+            <p role="alert" className="text-amber-200">
+              I cannot hear anything yet. Check that your microphone is not covered.
+            </p>
+          ) : level > 0.9 ? (
+            <p className="text-amber-200">Too loud! Move the phone a little farther away.</p>
+          ) : (
+            <p className="text-slate-300">The bar jumps when it hears you.</p>
+          )}
+          <button
+            type="button"
+            onClick={stopRecording}
+            className={`min-h-[72px] w-full rounded-2xl bg-slate-100 text-2xl font-black text-slate-950 hover:bg-white ${FOCUS}`}
+          >
+            ■ Stop
+          </button>
+        </div>
+      ) : null}
+
+      {phase === 'review' && take ? (
+        <div className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <p className="text-lg font-bold">Your {noun} is {clock(take.secs)} long.</p>
+          <audio key={take.url} src={take.url} controls className="w-full" />
+          <p className="text-slate-300">Tap play to listen. Happy with it?</p>
+          {added ? (
+            <>
+              <DonePanel
+                message="Your recording is on your timeline. It only lives on this page, so tap Save to my phone if you want to keep the sound."
+                againLabel="Record another"
+                onAgain={again}
+                onHome={onHome}
+              />
+              {saveLink}
+            </>
+          ) : (
+            <div className="grid gap-3">
+              <button type="button" onClick={useIt} className={BTN_PRIMARY}>
+                ✓ Use this {noun}
+              </button>
+              {saveLink}
+              <button type="button" onClick={again} className={`${BTN_SECONDARY} min-h-[56px] text-lg`}>
+                🔁 Record again
+              </button>
+            </div>
+          )}
+        </div>
+      ) : null}
     </Screen>
   );
 }
@@ -910,7 +984,17 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
     const props: ActivityProps = { choice: view.choice, modeLabel, onHome: goHome, onAdd: addClip };
     if (view.choice.action === 'prompt') return <PromptStep key={view.choice.id} {...props} />;
     if (view.choice.action === 'upload') return <UploadStep key={view.choice.id} {...props} />;
-    return <BeatBoxStep key={view.choice.id} {...props} />;
+    if (view.choice.action === 'record') return <RecordStep key={view.choice.id} {...props} />;
+    return (
+      <BeatBox
+        key={view.choice.id}
+        modeLabel={modeLabel}
+        onHome={goHome}
+        onAdd={addClip}
+        track={view.choice.track}
+        choiceId={view.choice.id}
+      />
+    );
   }
 
   return (
