@@ -22,7 +22,7 @@ export function Screen({ title, subtitle, modeLabel, onBack, backLabel = '← Ba
   }, []);
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <header className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-800">
+      <header className="flex items-center justify-between gap-3 px-4 py-3 landscape:py-2 border-b border-slate-800">
         <button type="button" onClick={onBack} className={BTN_SECONDARY}>
           {backLabel}
         </button>
@@ -30,9 +30,9 @@ export function Screen({ title, subtitle, modeLabel, onBack, backLabel = '← Ba
           ✓ {modeLabel}
         </div>
       </header>
-      <main className="max-w-xl mx-auto px-4 py-6 space-y-6">
+      <main className="max-w-xl landscape:max-w-4xl mx-auto px-4 py-6 landscape:py-3 space-y-6 landscape:space-y-4">
         <div className="space-y-2">
-          <h1 ref={headingRef} tabIndex={-1} className="text-3xl font-black leading-tight outline-none">
+          <h1 ref={headingRef} tabIndex={-1} className="text-3xl landscape:text-2xl font-black leading-tight outline-none">
             {title}
           </h1>
           {subtitle ? <p className="text-slate-300 text-base leading-relaxed">{subtitle}</p> : null}
@@ -55,7 +55,7 @@ export function DonePanel({ message, againLabel, onAgain, onHome }: DonePanelPro
     <div role="status" className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-5 space-y-4">
       <p className="text-2xl font-black text-emerald-300">🎉 Added to your project!</p>
       <p className="text-slate-200 leading-relaxed">{message}</p>
-      <div className="grid gap-3">
+      <div className="grid gap-3 landscape:grid-cols-2">
         <button type="button" onClick={onHome} className={BTN_PRIMARY}>
           Back to my project
         </button>
