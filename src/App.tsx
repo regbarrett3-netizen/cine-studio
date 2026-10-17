@@ -51,7 +51,7 @@ export default function App() {
         </div>
       </header>
 
-      <section className="max-w-3xl mx-auto px-6 pt-10 pb-6 text-center space-y-3">
+      <section className="max-w-3xl mx-auto px-6 pt-10 landscape:pt-4 pb-6 landscape:pb-3 text-center space-y-3">
         <h1 className="text-4xl md:text-5xl font-black tracking-tight text-white leading-tight">
           What do you want to{' '}
           <span className="bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent">make?</span>
@@ -59,14 +59,14 @@ export default function App() {
         <p className="text-slate-400 text-base">Tap one to start.</p>
       </section>
 
-      <section className="max-w-3xl mx-auto px-6 pb-6">
-        <div className="grid grid-cols-1 gap-4">
+      <section className="max-w-3xl landscape:max-w-5xl mx-auto px-6 pb-6">
+        <div className="grid grid-cols-1 landscape:grid-cols-3 gap-4">
           {GOALS.map((g) => (
             <button
               key={g.id}
               type="button"
               onClick={() => setGoal(g.id)}
-              className="flex min-h-[104px] items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900 p-5 text-left transition-all hover:border-pink-500 active:bg-slate-800 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-white"
+              className="flex min-h-[104px] items-center gap-4 landscape:flex-col landscape:text-center rounded-2xl border border-slate-800 bg-slate-900 p-5 text-left transition-all hover:border-pink-500 active:bg-slate-800 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-white"
             >
               <span className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${g.color} text-4xl`} aria-hidden="true">
                 {g.emoji}
