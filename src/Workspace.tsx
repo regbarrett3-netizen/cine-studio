@@ -3,7 +3,7 @@ import type { ChangeEvent, ReactNode } from 'react';
 import BeatBox from './BeatBox';
 import Keys from './Keys';
 import Mixer from './Mixer';
-import { saveToLibrary } from './mixEngine';
+import { saveToLibrary, readLibrary, removeFromLibrary, delBlob, loadSession, saveSession } from './mixEngine';
 import { generateMusic } from './musicApi';
 import type { AudioClip } from './mixEngine';
 import { INSTRUMENTS } from './instruments';
@@ -329,7 +329,12 @@ function PromptStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
       {phase === 'done' ? (
         <>
           <DonePanel message={message} againLabel="Make another idea" onAgain={again} onHome={onHome} />
-          {songUrl ? <audio controls src={songUrl} className="w-full" aria-label="Your new song" /> : null}
+          {songUrl ? (
+            <>
+              <audio controls playsInline preload="auto" src={songUrl} className="w-full" aria-label="Your new song" />
+              <p className="text-sm text-slate-400">No sound? Turn the ringer switch on and the volume up. Your song is also in 🎚️ Mix my project.</p>
+            </>
+          ) : null}
         </>
       ) : (
         <>
@@ -947,6 +952,42 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
   const [clips, setClips] = useState<ProjectClip[]>(() => readProjectClips(mode));
   const [barNotice, setBarNotice] = useState('');
   const [song, setSong] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  const removeClip = (c: ProjectClip) => {
+    try {
+      const raw = window.localStorage.getItem(`cine-timeline-${mode}`);
+      if (raw) {
+        const tracks = JSON.parse(raw) as { clips?: { id: string }[] }[];
+        for (const t of tracks) t.clips = (t.clips ?? []).filter((x) => x.id !== c.id);
+        window.localStorage.setItem(`cine-timeline-${mode}`, JSON.stringify(tracks));
+      }
+    } catch {
+      /* nothing saved to change */
+    }
+    const lib = readLibrary(mode).find((i) => i.name === c.name && (c.from === undefined || i.from === c.from));
+    if (lib) {
+      void removeFromLibrary(mode, lib.id);
+      const sess = loadSession(mode);
+      for (const ch of sess.channels) ch.regions = ch.regions.filter((rg) => rg.item !== lib.id);
+      saveSession(mode, sess);
+    }
+    setClips(readProjectClips(mode));
+  };
+
+  const startOver = () => {
+    for (const i of readLibrary(mode)) void removeFromLibrary(mode, i.id);
+    void delBlob(`song-${mode}`);
+    try {
+      window.localStorage.removeItem(`cine-timeline-${mode}`);
+      window.localStorage.removeItem(`cine-mix-${mode}`);
+    } catch {
+      /* storage blocked */
+    }
+    setSong(false);
+    setConfirmClear(false);
+    setClips(readProjectClips(mode));
+  };
 
   const viewKey = view.name === 'activity' ? `activity-${view.choice.id}` : view.name;
   useEffect(() => {
@@ -1096,11 +1137,30 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
                 <span aria-hidden="true" className="text-xl">
                   {c.type === 'audio' ? '🎵' : '🎬'}
                 </span>
-                <span className="min-w-0 break-words text-base">{c.name}</span>
+                <span className="min-w-0 flex-1 break-words text-base">{c.name}</span>
+                <button type="button" onClick={() => removeClip(c)} aria-label={`Remove ${c.name}`} className={`min-h-[44px] shrink-0 rounded-lg border border-slate-700 px-3 text-base font-bold text-slate-200 hover:border-rose-500 ${FOCUS}`}>
+                  ✕ Remove
+                </button>
               </li>
             ))}
           </ul>
         )}
+        {clips.length > 0 ? (
+          confirmClear ? (
+            <div className="flex gap-2">
+              <button type="button" onClick={startOver} className={`${BTN_SECONDARY} min-h-[48px] flex-1 border-rose-500 text-rose-200`}>
+                Yes, erase everything
+              </button>
+              <button type="button" onClick={() => setConfirmClear(false)} className={`${BTN_SECONDARY} min-h-[48px] flex-1`}>
+                Keep it
+              </button>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setConfirmClear(true)} className={`${BTN_SECONDARY} min-h-[48px] w-full`}>
+              🧹 Start over (clear my project)
+            </button>
+          )
+        ) : null}
         <button type="button" onClick={() => setView({ name: 'editor' })} className={`${BTN_SECONDARY} w-full min-h-[56px] text-lg`}>
           🎛️ Arrange my project
         </button>
