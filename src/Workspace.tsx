@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import BeatBox from './BeatBox';
+import Keys from './Keys';
+import Mixer from './Mixer';
+import { saveToLibrary } from './mixEngine';
+import type { AudioClip } from './mixEngine';
+import { INSTRUMENTS } from './instruments';
 import Editor, { addClipToProject, readProjectClips } from './Editor';
-import type { NewClip, ProjectClip } from './Editor';
+import type { ProjectClip } from './Editor';
 
 // Flip to true once /api/generate really makes music, video and sound.
 // While false, the "Make it" button saves the idea and says AI making is coming soon.
@@ -15,7 +20,7 @@ interface Choice {
   emoji: string;
   title: string;
   hint: string;
-  action: 'prompt' | 'upload' | 'beatbox' | 'record';
+  action: 'prompt' | 'upload' | 'beatbox' | 'record' | 'keys';
   kind: Kind; // what is being made: music, a video scene, or a sound effect
   track?: string; // preferred track name on the timeline
 }
@@ -59,6 +64,15 @@ const beatBox = (track?: string): Choice => ({
   title: 'BeatBox',
   hint: 'Play 9 drums or pick from 20 beats.',
   action: 'beatbox',
+  kind: 'music',
+  track,
+});
+const keysChoice = (track?: string): Choice => ({
+  id: 'keys',
+  emoji: '🎹',
+  title: 'Play an instrument',
+  hint: `A piano keyboard with ${INSTRUMENTS.length} instruments.`,
+  action: 'keys',
   kind: 'music',
   track,
 });
@@ -121,13 +135,13 @@ const MODES: Record<string, ModeConfig> = {
   music: {
     heading: "Let's make music!",
     intro: 'Tap a big button to start. You can try more than one.',
-    sections: [{ choices: [aiMusic(), ownSong(), beatBox(), recordMic()] }],
+    sections: [{ choices: [aiMusic(), ownSong(), beatBox(), keysChoice(), recordMic()] }],
   },
   'music-video': {
     heading: "Let's make a music video!",
     intro: 'Start with your song. Then add your video.',
     sections: [
-      { title: 'Step 1: Get your song', choices: [aiMusic('Song'), ownSong('Song'), beatBox('Song'), recordMic('Song')] },
+      { title: 'Step 1: Get your song', choices: [aiMusic('Song'), ownSong('Song'), beatBox('Song'), keysChoice('Song'), recordMic('Song')] },
       { title: 'Step 2: Add your video', choices: [aiScene('Visuals'), ownVideo('Visuals')] },
     ],
   },
@@ -145,14 +159,14 @@ const MODES: Record<string, ModeConfig> = {
     sections: [
       { title: 'Step 1: Make your scenes', choices: [aiScene('Scenes'), ownVideo('Scenes')] },
       { title: 'Step 2: Add sound effects', choices: [aiSound('Sound FX'), ownSound('Sound FX'), recordSound('Sound FX')] },
-      { title: 'Step 3: Add your soundtrack', choices: [aiMusic('Soundtrack'), ownSong('Soundtrack'), beatBox('Soundtrack'), recordMic('Soundtrack')] },
+      { title: 'Step 3: Add your soundtrack', choices: [aiMusic('Soundtrack'), ownSong('Soundtrack'), beatBox('Soundtrack'), keysChoice('Soundtrack'), recordMic('Soundtrack')] },
     ],
   },
   custom: {
     heading: "Let's make something!",
     intro: 'Tap a big button to start. You can try more than one.',
     sections: [
-      { title: 'Make some sound', choices: [aiMusic(), ownSong(), beatBox(), recordMic()] },
+      { title: 'Make some sound', choices: [aiMusic(), ownSong(), beatBox(), keysChoice(), recordMic()] },
       { title: 'Make some pictures', choices: [aiScene(), ownVideo()] },
     ],
   },
@@ -288,7 +302,7 @@ interface ActivityProps {
   choice: Choice;
   modeLabel: string;
   onHome: () => void;
-  onAdd: (clip: NewClip) => void;
+  onAdd: (clip: AudioClip) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -431,7 +445,7 @@ function looksLikeMedia(file: File, media: 'audio' | 'video'): boolean {
 function UploadStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
   const media = mediaOf(choice.kind);
   const noun = NOUN[choice.kind];
-  const [file, setFile] = useState<{ name: string; url: string } | null>(null);
+  const [file, setFile] = useState<{ name: string; url: string; blob: File } | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [added, setAdded] = useState(false);
@@ -461,7 +475,7 @@ function UploadStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
     urlRef.current = url;
     setError('');
     setDuration(null);
-    setFile({ name: picked.name, url });
+    setFile({ name: picked.name, url, blob: picked });
   };
 
   const onBroken = () => {
@@ -478,6 +492,7 @@ function UploadStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
       duration: Math.min(secs, MAX_CLIP_SECONDS),
       track: choice.track,
       from: choice.id,
+      blob: media === 'audio' ? file.blob : undefined,
     });
     setAdded(true);
   };
@@ -588,6 +603,7 @@ interface Take {
   url: string;
   secs: number;
   ext: string;
+  blob: Blob;
 }
 
 function RecordStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
@@ -658,7 +674,7 @@ function RecordStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     const url = URL.createObjectURL(blob);
     urlRef.current = url;
-    setTake({ url, secs, ext: extOf(mime) });
+    setTake({ url, secs, ext: extOf(mime), blob });
     setPhase('review');
   };
 
@@ -799,6 +815,7 @@ function RecordStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
       duration: Math.max(1, Math.min(take.secs, MAX_CLIP_SECONDS)),
       track: choice.track,
       from: choice.id,
+      blob: take.blob,
     });
     setAdded(true);
   };
@@ -948,7 +965,8 @@ function RecordStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
 type View =
   | { name: 'home' }
   | { name: 'activity'; choice: Choice }
-  | { name: 'editor' };
+  | { name: 'editor' }
+  | { name: 'mixer' };
 
 interface WorkspaceProps {
   mode: string;
@@ -971,8 +989,10 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
     setView({ name: 'home' });
   };
 
-  const addClip = (clip: NewClip) => {
+  const addClip = (clip: AudioClip) => {
     addClipToProject(mode, clip);
+    // keep the real sound too, so the mixer can play it
+    if (clip.blob) void saveToLibrary(mode, clip);
     setClips(readProjectClips(mode));
   };
 
@@ -980,11 +1000,27 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
     return <Editor mode={mode} modeLabel={modeLabel} onBack={goHome} />;
   }
 
+  if (view.name === 'mixer') {
+    return <Mixer mode={mode} modeLabel={modeLabel} onHome={goHome} onAdd={addClip} />;
+  }
+
   if (view.name === 'activity') {
     const props: ActivityProps = { choice: view.choice, modeLabel, onHome: goHome, onAdd: addClip };
     if (view.choice.action === 'prompt') return <PromptStep key={view.choice.id} {...props} />;
     if (view.choice.action === 'upload') return <UploadStep key={view.choice.id} {...props} />;
     if (view.choice.action === 'record') return <RecordStep key={view.choice.id} {...props} />;
+    if (view.choice.action === 'keys') {
+      return (
+        <Keys
+          key={view.choice.id}
+          modeLabel={modeLabel}
+          onHome={goHome}
+          onAdd={addClip}
+          track={view.choice.track}
+          choiceId={view.choice.id}
+        />
+      );
+    }
     return (
       <BeatBox
         key={view.choice.id}
@@ -1054,6 +1090,10 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
           🎛️ Arrange my project
         </button>
         <p className="text-sm text-slate-400">Move, cut and line up your clips on a timeline.</p>
+        <button type="button" onClick={() => setView({ name: 'mixer' })} className={`${BTN_PRIMARY} min-h-[56px] text-lg`}>
+          🎚️ Mix my project
+        </button>
+        <p className="text-sm text-slate-400">24 channels with faders, zoomable waves and recorded fader moves.</p>
       </section>
     </Screen>
   );
