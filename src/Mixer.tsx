@@ -128,10 +128,11 @@ interface FaderProps {
   value: number;
   onChange: (v: number, phase: 'down' | 'move' | 'up') => void;
   label: string;
+  h?: number;
   meterRef?: (el: HTMLDivElement | null) => void;
 }
 
-function Fader({ value, onChange, label, meterRef }: FaderProps) {
+function Fader({ value, onChange, label, h = FADER_H, meterRef }: FaderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const lastDown = useRef(0);
   const dragging = useRef(false);
@@ -172,9 +173,9 @@ function Fader({ value, onChange, label, meterRef }: FaderProps) {
     e.preventDefault();
   };
 
-  const top = (1 - value) * (FADER_H - CAP_H);
+  const top = (1 - value) * (h - CAP_H);
   return (
-    <div className="flex items-stretch justify-center gap-1.5" style={{ height: FADER_H }}>
+    <div className="flex items-stretch justify-center gap-1.5" style={{ height: h }}>
       <div
         ref={trackRef}
         role="slider"
@@ -191,13 +192,13 @@ function Fader({ value, onChange, label, meterRef }: FaderProps) {
         onPointerCancel={up}
         onKeyDown={key}
         className={`relative w-11 shrink-0 touch-none select-none rounded-lg bg-slate-950 ${FOCUS}`}
-        style={{ height: FADER_H }}
+        style={{ height: h }}
       >
         <div className="absolute left-1/2 top-2 bottom-2 w-1.5 -translate-x-1/2 rounded bg-slate-700" />
         <div
           aria-hidden="true"
           className="absolute left-0 right-0 h-px bg-slate-500"
-          style={{ top: CAP_H / 2 + (1 - FADER_UNITY) * (FADER_H - CAP_H) }}
+          style={{ top: CAP_H / 2 + (1 - FADER_UNITY) * (h - CAP_H) }}
         />
         <div
           aria-hidden="true"
@@ -241,6 +242,7 @@ interface StripProps {
   onSolo: (i: number) => void;
   onSelect: (i: number) => void;
   regMeter: (i: number, el: HTMLDivElement | null) => void;
+  faderH: number;
 }
 
 const Strip = memo(function Strip(p: StripProps) {
@@ -295,7 +297,7 @@ const Strip = memo(function Strip(p: StripProps) {
           {Math.abs(p.pan) < 0.02 ? 'Center' : p.pan < 0 ? `L ${Math.round(-p.pan * 100)}` : `R ${Math.round(p.pan * 100)}`}
         </p>
       </div>
-      <Fader value={p.vol} label={`Volume of channel ${i + 1}`} onChange={(v, ph) => p.onControl(i, 'vol', v, ph)} meterRef={(el) => p.regMeter(i, el)} />
+      <Fader value={p.vol} label={`Volume of channel ${i + 1}`} h={p.faderH} onChange={(v, ph) => p.onControl(i, 'vol', v, ph)} meterRef={(el) => p.regMeter(i, el)} />
       <p className="text-center text-sm font-black tabular-nums text-slate-100">{dbLabel(p.vol)} dB</p>
       <div className="grid grid-cols-2 gap-1.5">
         <button
@@ -375,6 +377,37 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
   const [loading, setLoading] = useState('');
   const [missing, setMissing] = useState(0);
   const [status, setStatus] = useState('');
+  const [vh, setVh] = useState(() => (typeof window !== 'undefined' ? window.innerHeight : 800));
+  const [isFull, setIsFull] = useState(false);
+  const land = typeof window !== 'undefined' && window.innerWidth > vh;
+  const faderH = land ? clamp(Math.round(vh * 0.4), 110, 200) : FADER_H;
+  const canFull = typeof document !== 'undefined' && !!document.documentElement.requestFullscreen && document.fullscreenEnabled === true;
+  useEffect(() => {
+    const onSize = () => setVh(window.innerHeight);
+    const onFull = () => setIsFull(!!document.fullscreenElement);
+    window.addEventListener('resize', onSize);
+    window.addEventListener('orientationchange', onSize);
+    document.addEventListener('fullscreenchange', onFull);
+    return () => {
+      window.removeEventListener('resize', onSize);
+      window.removeEventListener('orientationchange', onSize);
+      document.removeEventListener('fullscreenchange', onFull);
+    };
+  }, []);
+  const toggleFull = async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        (screen.orientation as ScreenOrientation & { unlock?: () => void }).unlock?.();
+      } else {
+        await document.documentElement.requestFullscreen();
+        // Android phones can be told to stay sideways; iPhones ignore this
+        await (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape').catch(() => undefined);
+      }
+    } catch {
+      /* not allowed here */
+    }
+  };
   const [exporting, setExporting] = useState(false);
   const [mixdown, setMixdown] = useState<{ url: string; seconds: number; peak: number; blob: Blob } | null>(null);
   const [mixAdded, setMixAdded] = useState(false);
@@ -1484,7 +1517,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <header className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
+      <header className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3 landscape:hidden">
         <button
           type="button"
           onClick={() => {
@@ -1495,14 +1528,38 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
         >
           ← Back to my project
         </button>
-        <div className="inline-flex items-center gap-2 truncate rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-400">
-          ✓ {modeLabel}
+        <div className="flex items-center gap-2">
+          {canFull ? (
+            <button type="button" onClick={() => void toggleFull()} aria-pressed={isFull} className={`${BTN_SM} text-sm`}>
+              {isFull ? '⤡ Exit full screen' : '⤢ Full screen'}
+            </button>
+          ) : null}
+          <div className="inline-flex items-center gap-2 truncate rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-400">
+            ✓ {modeLabel}
+          </div>
         </div>
       </header>
 
       {/* transport */}
       <div className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/95 px-3 py-2 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center gap-2">
+        <div className="mx-auto flex max-w-3xl flex-col landscape:max-w-none landscape:flex-row landscape:items-center landscape:gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <button
+            type="button"
+            aria-label="Back to my project"
+            onClick={() => {
+              if (playingRef.current) stopPlay();
+              onHome();
+            }}
+            className={`${BTN_SM} hidden landscape:inline-flex landscape:items-center`}
+          >
+            ←
+          </button>
+          {canFull ? (
+            <button type="button" aria-label={isFull ? 'Exit full screen' : 'Full screen'} onClick={() => void toggleFull()} className={`${BTN_SM} hidden landscape:inline-flex landscape:items-center`}>
+              {isFull ? '⤡' : '⤢'}
+            </button>
+          ) : null}
           <button type="button" aria-label="Go to the start" onClick={() => setPlayhead(0)} className={BTN_SM}>
             ⏮
           </button>
@@ -1527,7 +1584,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
             ↷
           </button>
         </div>
-        <div className="mx-auto mt-2 grid max-w-3xl grid-cols-2 gap-2" role="tablist">
+        <div className="mt-2 grid grid-cols-2 gap-2 landscape:mt-0 landscape:w-80 landscape:shrink-0" role="tablist">
           {(['edit', 'mix'] as const).map((t) => (
             <button
               key={t}
@@ -1541,10 +1598,14 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
             </button>
           ))}
         </div>
+        </div>
       </div>
 
-      <main className="mx-auto max-w-3xl space-y-4 px-3 py-4">
-        <div className="space-y-1 px-1">
+      <main className="mx-auto flex max-w-3xl flex-col gap-4 px-3 py-4 landscape:max-w-none">
+        <p className="hidden rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm font-semibold text-violet-200 portrait:block">
+          🔄 Turn your phone sideways to see more of the board.
+        </p>
+        <div className="space-y-1 px-1 landscape:hidden">
           <h1 className="text-3xl font-black leading-tight">Mix your song!</h1>
           <p className="leading-relaxed text-slate-300">
             24 channels. Zoom in on the waves to cut exactly, then move the faders. Record your fader moves and the board plays them back for you.
@@ -1580,6 +1641,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
           </p>
         ) : null}
 
+        <div className="space-y-4 landscape:order-last">
         <div className="grid grid-cols-3 gap-2">
           <button type="button" aria-expanded={panel === 'add'} onClick={() => setPanel(panel === 'add' ? '' : 'add')} className={`${BTN} text-sm`}>
             ＋ Add sound
@@ -1688,6 +1750,8 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
             </ul>
           </section>
         ) : null}
+
+        </div>
 
         {tab === 'edit' ? (
           <>
@@ -1990,7 +2054,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
         ) : (
           <>
           <section aria-label="Faders" className="space-y-2">
-            <p className="px-1 text-sm text-slate-400">Slide sideways to see all 24 channels. The big strip on the right is the master volume.</p>
+            <p className="px-1 text-sm text-slate-400 landscape:hidden">Slide sideways to see all 24 channels. The big strip on the right is the master volume.</p>
             <div className="flex gap-2">
               <div className="min-w-0 flex-1 overflow-x-auto pb-2" data-testid="strips" style={{ touchAction: 'pan-x' }}>
                 <div className="flex gap-2">
@@ -2015,6 +2079,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
                       onSolo={onSolo}
                       onSelect={onSelect}
                       regMeter={regMeter}
+                      faderH={faderH}
                     />
                   ))}
                 </div>
@@ -2025,6 +2090,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
                 <Fader
                   value={S.master}
                   label="Master volume"
+                  h={faderH}
                   onChange={(v) => setS({ ...SRef.current, master: v })}
                   meterRef={(el) => regMeter(CHANNELS, el)}
                 />
