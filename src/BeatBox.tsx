@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { wakeAudio } from './mixEngine';
 import type { AudioClip } from './mixEngine';
 
 /* ==================================================================== */
@@ -858,9 +859,10 @@ export default function BeatBox({ modeLabel, onHome, onAdd, track, choiceId }: P
       const ctx = new Ctor();
       ctxRef.current = ctx;
       busRef.current = createBus(ctx, drive / 100, master / 100);
+      void wakeAudio(ctx);
     }
     const ctx = ctxRef.current;
-    if (ctx.state === 'suspended') void ctx.resume();
+    if (ctx.state !== 'running') void wakeAudio(ctx);
     return { ctx, bus: busRef.current as Bus };
   };
 
