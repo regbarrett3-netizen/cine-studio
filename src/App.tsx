@@ -1,39 +1,32 @@
 import React, { useState } from 'react';
 
 import Workspace from './Workspace';
+import { readSaved, removeSaved } from './Flow';
+import type { SavedProject } from './Flow';
+
+const GOALS = [
+  { id: 'music', label: 'Music', emoji: '🎵', desc: 'Make a song: beats, keys, your voice.', color: 'from-purple-500 to-indigo-500' },
+  { id: 'music-video', label: 'Music Video', emoji: '💿', desc: 'A song plus a video made by AI.', color: 'from-pink-500 to-rose-500' },
+  { id: 'full-movie', label: 'Movie', emoji: '🎬', desc: 'Scenes, sound effects and a soundtrack.', color: 'from-amber-500 to-orange-500' },
+];
+const LABEL: Record<string, string> = { music: 'Music', 'music-video': 'Music Video', 'movie-sfx': 'Movie', 'full-movie': 'Movie' };
 
 export default function App() {
-  const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
-  const [showWorkspace, setShowWorkspace] = useState(false);
-if (showWorkspace) return <Workspace mode={selectedGoal ?? 'custom'} modeLabel={({ music: 'Make Music', 'music-video': 'Music + Music Video', 'movie-sfx': 'Movie + Sound Effects', 'full-movie': 'Movie + SFX + Soundtrack' } as Record<string, string>)[selectedGoal ?? ''] || 'Custom Project'} onBack={() => setShowWorkspace(false)} />;
+  const [goal, setGoal] = useState<string | null>(null);
+  const [saved, setSaved] = useState<SavedProject[]>(() => readSaved());
 
-
-  const projectGoals = [
-    {
-      id: 'music',
-      title: 'Make Music',
-      desc: 'Generate beat loops, stems, and full 808 audio tracks in seconds.',
-      color: 'from-purple-500 to-indigo-500'
-    },
-    {
-      id: 'music-video',
-      title: 'Music + Music Video',
-      desc: 'Sync dynamic visuals and video clips directly to your song.',
-      color: 'from-pink-500 to-rose-500'
-    },
-    {
-      id: 'movie-sfx',
-      title: 'Movie + Sound Effects',
-      desc: 'Build cinematic film scenes packed with realistic background SFX.',
-      color: 'from-amber-500 to-orange-500'
-    },
-    {
-      id: 'full-movie',
-      title: 'Movie + SFX + Soundtrack',
-      desc: 'The complete Hollywood package: dialogue, SFX, and custom score.',
-      color: 'from-emerald-500 to-teal-500'
-    }
-  ];
+  if (goal) {
+    return (
+      <Workspace
+        mode={goal}
+        modeLabel={LABEL[goal] ?? 'Project'}
+        onBack={() => {
+          setSaved(readSaved());
+          setGoal(null);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
@@ -58,62 +51,65 @@ if (showWorkspace) return <Workspace mode={selectedGoal ?? 'custom'} modeLabel={
         </div>
       </header>
 
-      {/* Hero Section */}
-      <section className="max-w-5xl mx-auto px-6 pt-12 pb-8 text-center space-y-6">
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-pink-500/10 border border-pink-500/20 text-pink-400 text-xs font-semibold">
-          ✨ The Most Powerful & Simple AI Studio on the Planet
-        </div>
-        <h1 className="text-4xl md:text-6xl font-black tracking-tight text-white leading-tight">
-          Make Hit Songs & Movies <br />
-          <span className="bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent">
-            In 3 Simple Steps
-          </span>
+      <section className="max-w-3xl mx-auto px-6 pt-10 pb-6 text-center space-y-3">
+        <h1 className="text-4xl md:text-5xl font-black tracking-tight text-white leading-tight">
+          What do you want to{' '}
+          <span className="bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent">make?</span>
         </h1>
-        <p className="text-slate-400 max-w-2xl mx-auto text-sm md:text-base leading-relaxed">
-          So easy a 4th grader can create a full cinematic movie in minutes. No complex software, no learning curve—just pure creativity.
-        </p>
+        <p className="text-slate-400 text-base">Tap one to start.</p>
       </section>
 
-      {/* Project Selector Section */}
-      <section className="max-w-5xl mx-auto px-6 py-8">
-        <div className="text-center mb-8">
-          <h2 className="text-xl font-bold text-white">What do you want to build today?</h2>
-          <p className="text-slate-400 text-xs mt-1">Tap a goal and we will show you the next step</p>
+      <section className="max-w-3xl mx-auto px-6 pb-6">
+        <div className="grid grid-cols-1 gap-4">
+          {GOALS.map((g) => (
+            <button
+              key={g.id}
+              type="button"
+              onClick={() => setGoal(g.id)}
+              className="flex min-h-[104px] items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900 p-5 text-left transition-all hover:border-pink-500 active:bg-slate-800 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-white"
+            >
+              <span className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${g.color} text-4xl`} aria-hidden="true">
+                {g.emoji}
+              </span>
+              <span className="space-y-1">
+                <span className="block text-3xl font-black text-white">{g.label}</span>
+                <span className="block text-base text-slate-400">{g.desc}</span>
+              </span>
+            </button>
+          ))}
         </div>
+      </section>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {projectGoals.map((goal) => {
-            const isSelected = selectedGoal === goal.id;
-            return (
+      {saved.length > 0 ? (
+        <section aria-label="Saved projects" className="max-w-3xl mx-auto px-6 pb-8 space-y-3">
+          <h2 className="text-xl font-bold text-pink-300">💾 My saved projects</h2>
+          {saved.map((s) => (
+            <div key={s.mode} className="flex items-center gap-2">
               <button
-                key={goal.id}
-                onClick={() => {
-                  setSelectedGoal(goal.id);
-                  setShowWorkspace(true);
-                }}
-                className={`p-5 rounded-2xl border text-left transition-all flex items-start gap-4 relative overflow-hidden ${
-                  isSelected 
-                    ? 'bg-slate-900 border-pink-500 ring-2 ring-pink-500/50 scale-[1.01]' 
-                    : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
-                }`}
+                type="button"
+                onClick={() => setGoal(s.mode)}
+                className="min-h-[64px] flex-1 rounded-2xl border border-slate-800 bg-slate-900 px-4 text-left hover:border-pink-500 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-white"
               >
-                <div className={`p-3 rounded-xl bg-gradient-to-br ${goal.color} text-white font-bold text-lg`}>
-                  {goal.id === 'music' ? '🎵' : goal.id === 'music-video' ? '💿' : goal.id === 'movie-sfx' ? '🎬' : '🎥'}
-                </div>
-                <div className="space-y-1 pr-6">
-                  <h3 className="font-bold text-white text-base">{goal.title}</h3>
-                  <p className="text-slate-400 text-xs leading-relaxed">{goal.desc}</p>
-                </div>
-                {isSelected && (
-                  <div className="absolute top-4 right-4 text-pink-400 font-bold">
-                    ✓
-                  </div>
-                )}
+                <span className="block text-lg font-bold">Finish my {s.label}</span>
+                <span className="block text-sm text-slate-400">
+                  {s.count} {s.count === 1 ? 'thing' : 'things'} added · saved {new Date(s.savedAt).toLocaleDateString()}
+                </span>
               </button>
-            );
-          })}
-        </div>
-      </section>
+              <button
+                type="button"
+                aria-label={`Remove saved ${s.label} from this list`}
+                onClick={() => {
+                  removeSaved(s.mode);
+                  setSaved(readSaved());
+                }}
+                className="min-h-[64px] min-w-[56px] rounded-2xl border border-slate-800 bg-slate-900 text-xl hover:border-rose-500 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-white"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </section>
+      ) : null}
 
       {/* Step-by-Step 4th-Grader Guide */}
       <section className="max-w-5xl mx-auto px-6 py-12 border-t border-slate-800/80">
