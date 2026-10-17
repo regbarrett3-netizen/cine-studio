@@ -504,7 +504,7 @@ export default function Editor({ mode, modeLabel, onBack }: EditorProps) {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <header className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-800">
+      <header className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-800 landscape:hidden">
         <button onClick={onBack} className={btn}>
           ← Back to my project
         </button>
@@ -513,9 +513,12 @@ export default function Editor({ mode, modeLabel, onBack }: EditorProps) {
         </div>
       </header>
 
-      <main className="p-4 space-y-4 max-w-5xl mx-auto">
+      <main className="p-4 space-y-4 max-w-5xl mx-auto landscape:max-w-none landscape:space-y-2 landscape:p-2">
         {/* Transport */}
         <section className="flex flex-wrap items-center gap-2">
+          <button onClick={onBack} aria-label="Back to my project" className={`${btn} hidden landscape:inline-block`}>
+            ←
+          </button>
           <button onClick={togglePlay} className={`${btn} bg-violet-600 hover:bg-violet-500 text-white min-w-[72px]`}>
             {playing ? '❚❚ Pause' : '▶ Play'}
           </button>
@@ -607,10 +610,10 @@ export default function Editor({ mode, modeLabel, onBack }: EditorProps) {
         </section>
 
         {/* Inspector */}
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+        <section className={`rounded-xl border border-slate-800 bg-slate-900 p-4 landscape:p-2 ${selClip ? '' : 'landscape:hidden'}`}>
           {selClip ? (
-            <div className="grid grid-cols-2 gap-3">
-              <label className="col-span-2 text-xs text-slate-400">
+            <div className="grid grid-cols-2 gap-3 landscape:grid-cols-4 landscape:items-end landscape:gap-2">
+              <label className="col-span-2 text-xs text-slate-400 landscape:col-span-2">
                 Clip name
                 <input
                   value={selClip.name}
