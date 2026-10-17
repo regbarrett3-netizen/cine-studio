@@ -8,10 +8,8 @@ import type { AudioClip } from './mixEngine';
 import { INSTRUMENTS } from './instruments';
 import Editor, { addClipToProject, readProjectClips } from './Editor';
 import type { ProjectClip } from './Editor';
-
-// Flip to true once /api/generate really makes music, video and sound.
-// While false, the "Make it" button saves the idea and says AI making is coming soon.
-const GENERATION_IS_LIVE = false;
+import { BTN_PRIMARY, BTN_DISABLED, BTN_SECONDARY, DonePanel, FOCUS, Screen } from './ui';
+import { ContinueScreen, GENERATION_IS_LIVE, GenerateBar, GenerateScreen, SongReady, VideoAiStep } from './Flow';
 
 type Kind = 'music' | 'scene' | 'sfx';
 
@@ -227,76 +225,6 @@ const MAX_CLIP_SECONDS = 600;
 
 const shorten = (s: string, n = 42) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 const stripExt = (name: string) => name.replace(/\.[^.]+$/, '');
-
-const FOCUS = 'focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-white';
-const BTN_PRIMARY = `w-full min-h-[64px] px-6 py-4 rounded-2xl font-bold text-lg bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 text-white shadow-lg shadow-pink-500/25 ${FOCUS}`;
-const BTN_DISABLED = `w-full min-h-[64px] px-6 py-4 rounded-2xl font-bold text-lg bg-slate-800 text-slate-400 cursor-not-allowed ${FOCUS}`;
-const BTN_SECONDARY = `min-h-[48px] px-4 py-2 rounded-xl text-base font-semibold bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-100 ${FOCUS}`;
-
-/* ------------------------------------------------------------------ */
-/* Shared layout                                                       */
-/* ------------------------------------------------------------------ */
-
-interface ScreenProps {
-  title: string;
-  subtitle?: string;
-  modeLabel: string;
-  onBack: () => void;
-  backLabel?: string;
-  children: ReactNode;
-}
-
-function Screen({ title, subtitle, modeLabel, onBack, backLabel = '← Back', children }: ScreenProps) {
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  useEffect(() => {
-    headingRef.current?.focus({ preventScroll: true });
-  }, []);
-  return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <header className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-800">
-        <button type="button" onClick={onBack} className={BTN_SECONDARY}>
-          {backLabel}
-        </button>
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold truncate">
-          ✓ {modeLabel}
-        </div>
-      </header>
-      <main className="max-w-xl mx-auto px-4 py-6 space-y-6">
-        <div className="space-y-2">
-          <h1 ref={headingRef} tabIndex={-1} className="text-3xl font-black leading-tight outline-none">
-            {title}
-          </h1>
-          {subtitle ? <p className="text-slate-300 text-base leading-relaxed">{subtitle}</p> : null}
-        </div>
-        {children}
-      </main>
-    </div>
-  );
-}
-
-interface DonePanelProps {
-  message: string;
-  againLabel: string;
-  onAgain: () => void;
-  onHome: () => void;
-}
-
-function DonePanel({ message, againLabel, onAgain, onHome }: DonePanelProps) {
-  return (
-    <div role="status" className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-5 space-y-4">
-      <p className="text-2xl font-black text-emerald-300">🎉 Added to your project!</p>
-      <p className="text-slate-200 leading-relaxed">{message}</p>
-      <div className="grid gap-3">
-        <button type="button" onClick={onHome} className={BTN_PRIMARY}>
-          Back to my project
-        </button>
-        <button type="button" onClick={onAgain} className={`${BTN_SECONDARY} min-h-[56px] text-lg`}>
-          {againLabel}
-        </button>
-      </div>
-    </div>
-  );
-}
 
 interface ActivityProps {
   choice: Choice;
@@ -966,7 +894,11 @@ type View =
   | { name: 'home' }
   | { name: 'activity'; choice: Choice }
   | { name: 'editor' }
-  | { name: 'mixer' };
+  | { name: 'mixer' }
+  | { name: 'continue' }
+  | { name: 'generate' }
+  | { name: 'ready'; blob: Blob; seconds: number }
+  | { name: 'video' };
 
 interface WorkspaceProps {
   mode: string;
@@ -978,6 +910,8 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
   const config = MODES[mode] ?? MODES.custom;
   const [view, setView] = useState<View>({ name: 'home' });
   const [clips, setClips] = useState<ProjectClip[]>(() => readProjectClips(mode));
+  const [barNotice, setBarNotice] = useState('');
+  const [song, setSong] = useState(false);
 
   const viewKey = view.name === 'activity' ? `activity-${view.choice.id}` : view.name;
   useEffect(() => {
@@ -985,6 +919,7 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
   }, [viewKey]);
 
   const goHome = () => {
+    setBarNotice('');
     setClips(readProjectClips(mode));
     setView({ name: 'home' });
   };
@@ -995,6 +930,51 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
     if (clip.blob) void saveToLibrary(mode, clip);
     setClips(readProjectClips(mode));
   };
+
+  if (view.name === 'continue') {
+    return (
+      <ContinueScreen
+        mode={mode}
+        modeLabel={modeLabel}
+        count={clips.length}
+        onProject={goHome}
+        onSaved={onBack}
+        onBack={goHome}
+      />
+    );
+  }
+
+  if (view.name === 'generate') {
+    return (
+      <GenerateScreen
+        mode={mode}
+        modeLabel={modeLabel}
+        onBack={goHome}
+        onReady={(r) => {
+          addClipToProject(mode, { name: 'My finished song', type: 'audio', duration: Math.max(1, r.seconds), track: 'Song', from: 'generated' });
+          setSong(true);
+          setView({ name: 'ready', blob: r.blob, seconds: r.seconds });
+        }}
+      />
+    );
+  }
+
+  if (view.name === 'ready') {
+    return (
+      <SongReady
+        mode={mode}
+        modeLabel={modeLabel}
+        blob={view.blob}
+        seconds={view.seconds}
+        onVideo={() => setView({ name: 'video' })}
+        onHome={goHome}
+      />
+    );
+  }
+
+  if (view.name === 'video') {
+    return <VideoAiStep mode={mode} modeLabel={modeLabel} hasSong={song} onHome={goHome} onAdd={addClip} />;
+  }
 
   if (view.name === 'editor') {
     return <Editor mode={mode} modeLabel={modeLabel} onBack={goHome} />;
@@ -1095,6 +1075,22 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
         </button>
         <p className="text-sm text-slate-400">24 channels with faders, zoomable waves and recorded fader moves.</p>
       </section>
+
+      <GenerateBar
+        notice={barNotice}
+        onGenerate={() => {
+          if (clips.length === 0) {
+            setBarNotice('Pick something above first: a beat, the keys, your voice or a song.');
+            return;
+          }
+          setBarNotice('');
+          setView({ name: 'generate' });
+        }}
+        onContinue={() => {
+          setBarNotice('');
+          setView({ name: 'continue' });
+        }}
+      />
     </Screen>
   );
 }
