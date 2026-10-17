@@ -55,12 +55,6 @@ if (showWorkspace) return <Workspace mode={selectedGoal ?? 'custom'} modeLabel={
               </span>
             </div>
           </div>
-          <button 
-            onClick={() => setShowWorkspace(true)}
-            className="text-xs font-semibold text-slate-300 hover:text-white border border-slate-700 px-4 py-2 rounded-xl bg-slate-900"
-          >
-            Skip to Canvas →
-          </button>
         </div>
       </header>
 
@@ -84,7 +78,7 @@ if (showWorkspace) return <Workspace mode={selectedGoal ?? 'custom'} modeLabel={
       <section className="max-w-5xl mx-auto px-6 py-8">
         <div className="text-center mb-8">
           <h2 className="text-xl font-bold text-white">What do you want to build today?</h2>
-          <p className="text-slate-400 text-xs mt-1">Pick a goal to auto-configure your studio workspace</p>
+          <p className="text-slate-400 text-xs mt-1">Tap a goal and we will show you the next step</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -93,7 +87,10 @@ if (showWorkspace) return <Workspace mode={selectedGoal ?? 'custom'} modeLabel={
             return (
               <button
                 key={goal.id}
-                onClick={() => setSelectedGoal(goal.id)}
+                onClick={() => {
+                  setSelectedGoal(goal.id);
+                  setShowWorkspace(true);
+                }}
                 className={`p-5 rounded-2xl border text-left transition-all flex items-start gap-4 relative overflow-hidden ${
                   isSelected 
                     ? 'bg-slate-900 border-pink-500 ring-2 ring-pink-500/50 scale-[1.01]' 
@@ -115,22 +112,6 @@ if (showWorkspace) return <Workspace mode={selectedGoal ?? 'custom'} modeLabel={
               </button>
             );
           })}
-        </div>
-
-        {/* CTA Launch Button */}
-        <div className="mt-8 text-center">
-          <button
-            onClick={() => setShowWorkspace(true)}
-            disabled={!selectedGoal}
-            className={`px-8 py-4 rounded-2xl font-bold text-sm transition-all flex items-center gap-3 mx-auto shadow-lg ${
-              selectedGoal
-                ? 'bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 text-white hover:opacity-95 shadow-pink-500/25 cursor-pointer'
-                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-            }`}
-          >
-            <span>{selectedGoal ? 'Open My Studio Canvas' : 'Pick a goal above to start'}</span>
-            <span>→</span>
-          </button>
         </div>
       </section>
 
