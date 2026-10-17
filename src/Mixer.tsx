@@ -372,6 +372,11 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
   const [width, setWidth] = useState(340);
   const [view, setViewState] = useState({ t0: 0, pps: 40 });
   const [panel, setPanel] = useState<'' | 'add' | 'mix' | 'help'>('');
+  useEffect(() => {
+    if (!panel) return;
+    const t = window.setTimeout(() => document.querySelector('[data-panel]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
+    return () => window.clearTimeout(t);
+  }, [panel]);
   const [library, setLibrary] = useState<LibItem[]>(() => readLibrary(mode));
   const [bufVer, setBufVer] = useState(0);
   const [loading, setLoading] = useState('');
@@ -1655,7 +1660,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
         </div>
 
         {panel === 'add' ? (
-          <section aria-label="Add a sound" className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-3">
+          <section data-panel="add" aria-label="Add a sound" className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-3">
             <p className="text-base font-bold">
               Adds to channel {selCh + 1} at the red line.
             </p>
@@ -1695,7 +1700,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
         ) : null}
 
         {panel === 'mix' ? (
-          <section aria-label="Mix down" className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <section data-panel="mix" aria-label="Mix down" className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-4">
             <p className="text-lg font-bold">Make one finished song file</p>
             <p className="text-slate-300">This plays every channel, your fader moves and your pan moves into a single stereo WAV file.</p>
             <button type="button" onClick={() => void doMixdown()} disabled={!anySounds || exporting} className={`${BTN_PRIMARY} disabled:opacity-50`}>
@@ -1724,7 +1729,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
         ) : null}
 
         {panel === 'help' ? (
-          <section aria-label="Help" className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-4 text-slate-200">
+          <section data-panel="help" aria-label="Help" className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-4 text-slate-200">
             <p className="text-lg font-bold">How to use the mixer</p>
             <ul className="list-disc space-y-1.5 pl-5">
               <li>Tap a wave to pick it. Drag it to move it. Drag empty space to slide the view.</li>
