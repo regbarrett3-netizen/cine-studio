@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
-import BeatBox from './BeatBox';
 import Editor, { addClipToProject, readProjectClips } from './Editor';
 import type { NewClip, ProjectClip } from './Editor';
 
@@ -57,7 +56,7 @@ const beatBox = (track?: string): Choice => ({
   id: 'beatbox',
   emoji: '🥁',
   title: 'BeatBox',
-  hint: 'Play 9 drums or pick from 20 beats.',
+  hint: 'Tap the squares to build a drum beat.',
   action: 'beatbox',
   kind: 'music',
   track,
@@ -399,9 +398,14 @@ function PromptStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
 /* ------------------------------------------------------------------ */
 
 function looksLikeMedia(file: File, media: 'audio' | 'video'): boolean {
-  if (file.type) return file.type.startsWith(`${media}/`);
+  if (file.type.startsWith(`${media}/`)) return true;
+  // Phones often hand over files from Files / Drive / iCloud with an empty or
+  // odd type, so fall back to the file extension.
   const ext = /\.([a-z0-9]+)$/i.exec(file.name)?.[1]?.toLowerCase() ?? '';
-  const known = media === 'audio' ? ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'] : ['mp4', 'mov', 'm4v', 'webm'];
+  const known =
+    media === 'audio'
+      ? ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac', 'aif', 'aiff', 'caf', 'mp4']
+      : ['mp4', 'mov', 'm4v', 'webm', '3gp'];
   return known.includes(ext);
 }
 
@@ -442,7 +446,7 @@ function UploadStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
   };
 
   const onBroken = () => {
-    setError(`This phone cannot play that ${noun}. Try a different one.`);
+    setError(`This phone could not open that ${noun}. If it is in iCloud or Drive, download it to your phone first, then try again.`);
     setFile(null);
   };
 
@@ -490,7 +494,11 @@ function UploadStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
             <span>{file ? `Choose a different ${noun}` : `Choose a ${noun}`}</span>
             <input
               type="file"
-              accept={`${media}/*`}
+              accept={
+                media === 'audio'
+                  ? 'audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.aif,.aiff'
+                  : 'video/*,.mp4,.mov,.m4v,.webm'
+              }
               onChange={onPick}
               className="sr-only"
               aria-label={`Choose a ${noun} from your phone`}
@@ -532,6 +540,327 @@ function UploadStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
               </button>
             </div>
           ) : null}
+        </>
+      )}
+    </Screen>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* BeatBox: a tap-the-squares drum machine                             */
+/* ------------------------------------------------------------------ */
+
+const STEPS = 8;
+const BEAT_STORAGE_KEY = 'cine-beat-pattern';
+
+interface BeatRow {
+  id: 'boom' | 'clap' | 'tick' | 'ding';
+  label: string;
+  emoji: string;
+  on: string;
+  chance: number; // chance a square is on in "Surprise me"
+}
+
+const BEAT_ROWS: BeatRow[] = [
+  { id: 'boom', label: 'Boom', emoji: '🥁', on: 'bg-pink-500 border-pink-300', chance: 0.3 },
+  { id: 'clap', label: 'Clap', emoji: '👏', on: 'bg-amber-400 border-amber-200', chance: 0.25 },
+  { id: 'tick', label: 'Tick', emoji: '⏱️', on: 'bg-sky-400 border-sky-200', chance: 0.5 },
+  { id: 'ding', label: 'Ding', emoji: '🔔', on: 'bg-emerald-400 border-emerald-200', chance: 0.15 },
+];
+
+const TEMPOS = [
+  { label: 'Slow', bpm: 90 },
+  { label: 'Medium', bpm: 115 },
+  { label: 'Fast', bpm: 140 },
+];
+
+type Pattern = boolean[][];
+
+const STARTER: number[][] = [
+  [1, 0, 0, 0, 1, 0, 0, 0],
+  [0, 0, 1, 0, 0, 0, 1, 0],
+  [1, 0, 1, 0, 1, 0, 1, 0],
+  [0, 0, 0, 0, 0, 0, 0, 0],
+];
+
+const starterPattern = (): Pattern => STARTER.map((row) => row.map((v) => v === 1));
+
+function loadPattern(): Pattern {
+  try {
+    const raw = window.localStorage.getItem(BEAT_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (
+        Array.isArray(parsed) &&
+        parsed.length === BEAT_ROWS.length &&
+        parsed.every((row) => Array.isArray(row) && row.length === STEPS && row.every((v) => typeof v === 'boolean'))
+      ) {
+        return parsed as Pattern;
+      }
+    }
+  } catch {
+    // fall through to the starter beat
+  }
+  return starterPattern();
+}
+
+function makeNoise(ctx: AudioContext): AudioBuffer {
+  const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.5), ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  return buffer;
+}
+
+function playSound(ctx: AudioContext, noise: AudioBuffer, id: BeatRow['id'], when: number): void {
+  const out = ctx.createGain();
+  out.gain.value = 0.9;
+  out.connect(ctx.destination);
+
+  if (id === 'boom') {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(160, when);
+    osc.frequency.exponentialRampToValueAtTime(40, when + 0.15);
+    gain.gain.setValueAtTime(1, when);
+    gain.gain.exponentialRampToValueAtTime(0.001, when + 0.35);
+    osc.connect(gain);
+    gain.connect(out);
+    osc.start(when);
+    osc.stop(when + 0.4);
+  } else if (id === 'ding') {
+    [880, 1760].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, when);
+      gain.gain.setValueAtTime(i === 0 ? 0.5 : 0.18, when);
+      gain.gain.exponentialRampToValueAtTime(0.001, when + 0.6);
+      osc.connect(gain);
+      gain.connect(out);
+      osc.start(when);
+      osc.stop(when + 0.65);
+    });
+  } else {
+    // clap and tick are short bursts of filtered noise
+    const src = ctx.createBufferSource();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    src.buffer = noise;
+    if (id === 'clap') {
+      filter.type = 'bandpass';
+      filter.frequency.value = 1800;
+      filter.Q.value = 0.8;
+      gain.gain.setValueAtTime(0.9, when);
+      gain.gain.exponentialRampToValueAtTime(0.001, when + 0.18);
+    } else {
+      filter.type = 'highpass';
+      filter.frequency.value = 6500;
+      gain.gain.setValueAtTime(0.5, when);
+      gain.gain.exponentialRampToValueAtTime(0.001, when + 0.06);
+    }
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(out);
+    src.start(when);
+    src.stop(when + 0.25);
+  }
+}
+
+function BeatBoxStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
+  const [pattern, setPattern] = useState<Pattern>(loadPattern);
+  const [tempoIdx, setTempoIdx] = useState(1);
+  const [playing, setPlaying] = useState(false);
+  const [activeStep, setActiveStep] = useState(-1);
+  const [added, setAdded] = useState(false);
+
+  const ctxRef = useRef<AudioContext | null>(null);
+  const noiseRef = useRef<AudioBuffer | null>(null);
+  const timerRef = useRef<number | undefined>(undefined);
+  const playingRef = useRef(false);
+  const nextTimeRef = useRef(0);
+  const stepRef = useRef(0);
+  const patternRef = useRef(pattern);
+  const bpmRef = useRef(TEMPOS[1].bpm);
+  patternRef.current = pattern;
+  bpmRef.current = TEMPOS[tempoIdx].bpm;
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(BEAT_STORAGE_KEY, JSON.stringify(pattern));
+    } catch {
+      // ignore
+    }
+  }, [pattern]);
+
+  const ensureAudio = (): { ctx: AudioContext; noise: AudioBuffer } => {
+    if (!ctxRef.current) {
+      const Ctor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      ctxRef.current = new Ctor();
+      noiseRef.current = makeNoise(ctxRef.current);
+    }
+    if (ctxRef.current.state === 'suspended') void ctxRef.current.resume();
+    return { ctx: ctxRef.current, noise: noiseRef.current as AudioBuffer };
+  };
+
+  const stop = () => {
+    window.clearInterval(timerRef.current);
+    playingRef.current = false;
+    setPlaying(false);
+    setActiveStep(-1);
+  };
+
+  const start = () => {
+    const { ctx, noise } = ensureAudio();
+    nextTimeRef.current = ctx.currentTime + 0.05;
+    stepRef.current = 0;
+    playingRef.current = true;
+    setPlaying(true);
+    timerRef.current = window.setInterval(() => {
+      while (nextTimeRef.current < ctx.currentTime + 0.15) {
+        const step = stepRef.current;
+        const when = nextTimeRef.current;
+        BEAT_ROWS.forEach((row, r) => {
+          if (patternRef.current[r][step]) playSound(ctx, noise, row.id, when);
+        });
+        window.setTimeout(() => {
+          if (playingRef.current) setActiveStep(step);
+        }, Math.max(0, (when - ctx.currentTime) * 1000));
+        nextTimeRef.current += 60 / bpmRef.current / 2;
+        stepRef.current = (step + 1) % STEPS;
+      }
+    }, 25);
+  };
+
+  useEffect(
+    () => () => {
+      window.clearInterval(timerRef.current);
+      playingRef.current = false;
+      void ctxRef.current?.close();
+      ctxRef.current = null;
+    },
+    [],
+  );
+
+  const hear = (id: BeatRow['id']) => {
+    const { ctx, noise } = ensureAudio();
+    playSound(ctx, noise, id, ctx.currentTime);
+  };
+
+  const toggle = (r: number, i: number) => {
+    const turningOn = !pattern[r][i];
+    setPattern((prev) => prev.map((row, ri) => (ri === r ? row.map((v, vi) => (vi === i ? !v : v)) : row)));
+    if (turningOn) hear(BEAT_ROWS[r].id);
+  };
+
+  const surprise = () => {
+    setPattern(BEAT_ROWS.map((row) => Array.from({ length: STEPS }, () => Math.random() < row.chance)));
+  };
+
+  const clear = () => setPattern(BEAT_ROWS.map(() => Array<boolean>(STEPS).fill(false)));
+
+  const hasSquares = pattern.some((row) => row.some(Boolean));
+
+  const addIt = () => {
+    if (!hasSquares) return;
+    stop();
+    onAdd({ name: 'My beat', type: 'audio', duration: 8, track: choice.track, from: choice.id });
+    setAdded(true);
+  };
+
+  return (
+    <Screen
+      title="Make your beat!"
+      subtitle="Tap the squares to turn sounds on. Then press Play to hear your beat."
+      modeLabel={modeLabel}
+      onBack={() => {
+        stop();
+        onHome();
+      }}
+      backLabel="← Back to my project"
+    >
+      {added ? (
+        <DonePanel
+          message="Your beat is on your timeline."
+          againLabel="Keep making my beat"
+          onAgain={() => setAdded(false)}
+          onHome={onHome}
+        />
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={playing ? stop : start}
+            className={`w-full min-h-[64px] rounded-2xl text-xl font-bold ${FOCUS} ${
+              playing ? 'bg-rose-600 hover:bg-rose-500 text-white' : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
+            }`}
+          >
+            {playing ? '■ Stop' : '▶ Play my beat'}
+          </button>
+
+          <div className="space-y-4">
+            {BEAT_ROWS.map((row, r) => (
+              <div key={row.id} className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => hear(row.id)}
+                  className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-3 text-base font-bold ${FOCUS}`}
+                >
+                  <span aria-hidden="true">{row.emoji}</span>
+                  {row.label}
+                  <span className="text-xs font-normal text-slate-400">tap to hear</span>
+                </button>
+                <div className="grid grid-cols-8 gap-1">
+                  {pattern[r].map((on, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      aria-pressed={on}
+                      aria-label={`${row.label}, square ${i + 1}`}
+                      onClick={() => toggle(r, i)}
+                      className={`h-14 rounded-lg border-2 ${FOCUS} ${
+                        on ? row.on : 'bg-slate-900 border-slate-700'
+                      } ${activeStep === i ? (on ? 'brightness-150 border-white' : 'bg-slate-600 border-white') : ''}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-base font-bold">How fast?</p>
+            <div className="grid grid-cols-3 gap-2">
+              {TEMPOS.map((t, i) => (
+                <button
+                  key={t.label}
+                  type="button"
+                  aria-pressed={tempoIdx === i}
+                  onClick={() => setTempoIdx(i)}
+                  className={`min-h-[52px] rounded-xl text-base font-bold ${FOCUS} ${
+                    tempoIdx === i ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <button type="button" onClick={surprise} className={`${BTN_SECONDARY} min-h-[56px] text-lg`}>
+              🎲 Surprise me
+            </button>
+            <button type="button" onClick={clear} className={`${BTN_SECONDARY} min-h-[56px] text-lg`}>
+              🧹 Clear
+            </button>
+          </div>
+
+          <button type="button" onClick={addIt} disabled={!hasSquares} className={hasSquares ? BTN_PRIMARY : BTN_DISABLED}>
+            {hasSquares ? '✓ Add my beat to my project' : 'Tap some squares first'}
+          </button>
         </>
       )}
     </Screen>
@@ -581,16 +910,7 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
     const props: ActivityProps = { choice: view.choice, modeLabel, onHome: goHome, onAdd: addClip };
     if (view.choice.action === 'prompt') return <PromptStep key={view.choice.id} {...props} />;
     if (view.choice.action === 'upload') return <UploadStep key={view.choice.id} {...props} />;
-    return (
-      <BeatBox
-        key={view.choice.id}
-        modeLabel={modeLabel}
-        onHome={goHome}
-        onAdd={addClip}
-        track={view.choice.track}
-        choiceId={view.choice.id}
-      />
-    );
+    return <BeatBoxStep key={view.choice.id} {...props} />;
   }
 
   return (
