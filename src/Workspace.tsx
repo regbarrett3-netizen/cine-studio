@@ -1018,7 +1018,7 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
       {config.sections.map((section, si) => (
         <section key={section.title ?? `section-${si}`} className="space-y-3" aria-label={section.title}>
           {section.title ? <h2 className="text-xl font-bold text-pink-300">{section.title}</h2> : null}
-          <div className="grid gap-3">
+          <div className="grid gap-3 landscape:grid-cols-2">
             {section.choices.map((choice) => {
               const count = clips.filter((c) => c.from === choice.id).length;
               return (
