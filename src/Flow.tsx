@@ -121,7 +121,7 @@ export function ContinueScreen({ mode, modeLabel, count, onProject, onSaved, onB
           </button>
         </div>
       ) : (
-        <div className="grid gap-3">
+        <div className="grid gap-3 landscape:grid-cols-2">
           <button type="button" onClick={onProject} className={`${BTN_PRIMARY} min-h-[88px] text-2xl`}>
             {isMovie(mode) ? '🎥' : mode === 'music-video' ? '💿' : '🎵'} {word}
             <span className="mt-1 block text-sm font-semibold opacity-90">Go back to my unfinished project</span>
@@ -289,7 +289,7 @@ export function SongReady({ mode, modeLabel, blob, seconds, onVideo, onHome }: R
           {note}
         </p>
       ) : null}
-      <div className="grid gap-3">
+      <div className="grid gap-3 landscape:grid-cols-2">
         <button type="button" onClick={() => void save()} disabled={saving} className={`${BTN_PRIMARY} min-h-[80px] text-2xl`}>
           💾 Save
           <span className="mt-1 block text-sm font-semibold opacity-90">Save the file to Files</span>
