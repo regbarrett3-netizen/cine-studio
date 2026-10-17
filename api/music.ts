@@ -5,7 +5,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const MODEL = 'fal-ai/lyria3/pro';
 const QUEUE = 'https://queue.fal.run/fal-ai/lyria3/';
-const MAX_PROMPT = 2000;
+const MAX_PROMPT = 3500;
 const PER_MINUTE = 4; // submits per minute per IP
 const DAILY_CAP = Number(process.env.MUSIC_DAILY_CAP ?? '40'); // songs per day per server copy
 
