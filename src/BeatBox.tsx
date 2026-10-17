@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { NewClip } from './Editor';
+import type { AudioClip } from './mixEngine';
 
 /* ==================================================================== */
 /* 1. The kit: nine saturated 808-style drums                            */
@@ -621,7 +621,7 @@ const BAR_CHOICES = [1, 2, 4, 8];
 interface Props {
   modeLabel: string;
   onHome: () => void;
-  onAdd: (clip: NewClip) => void;
+  onAdd: (clip: AudioClip) => void;
   track?: string;
   choiceId: string;
 }
@@ -1006,10 +1006,19 @@ export default function BeatBox({ modeLabel, onHome, onAdd, track, choiceId }: P
   /* ---------- finishing ---------- */
   const beatName = beat ? beat.name : 'My beat';
 
-  const addToProject = () => {
+  const addToProject = async () => {
+    if (saving || !ready) return;
     stop();
     const stepDur = 60 / bpm / 4;
-    onAdd({ name: beatName, type: 'audio', duration: bars * STEPS * stepDur, track, from: choiceId });
+    setSaving(true);
+    let blob: Blob | undefined;
+    try {
+      blob = await renderWav(bufsRef.current, patternRef.current, mixRef.current, bpm, swing, drive, master, bars);
+    } catch {
+      blob = undefined; // still add the clip: the mixer will just show it as silent
+    }
+    setSaving(false);
+    onAdd({ name: beatName, type: 'audio', duration: bars * STEPS * stepDur, track, from: choiceId, blob });
     setAdded(true);
   };
 
@@ -1350,7 +1359,7 @@ export default function BeatBox({ modeLabel, onHome, onAdd, track, choiceId }: P
                   ))}
                 </div>
               </div>
-              <button type="button" onClick={addToProject} className={BTN_PRIMARY}>
+              <button type="button" onClick={() => void addToProject()} disabled={saving} className={BTN_PRIMARY}>
                 ✓ Add my beat to my project
               </button>
               <button type="button" onClick={saveWav} disabled={saving || !ready} className={`${saving || !ready ? BTN_DISABLED : BTN} w-full min-h-[56px] text-lg`}>
