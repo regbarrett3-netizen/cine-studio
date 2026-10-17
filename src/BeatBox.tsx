@@ -1068,7 +1068,7 @@ export default function BeatBox({ modeLabel, onHome, onAdd, track, choiceId }: P
           <p className="text-base text-slate-300">
             Tap the pads to play. Press <b>Rec</b>, then <b>Play</b>, and your taps go into the beat.
           </p>
-          <div className="grid gap-3">
+          <div className="grid gap-3 landscape:grid-cols-3">
             {PAD_LAYOUT.map((row, ri) => (
               <div key={ri} className="grid grid-cols-3 gap-3">
                 {row.map((id) => (
@@ -1110,7 +1110,7 @@ export default function BeatBox({ modeLabel, onHome, onAdd, track, choiceId }: P
             <p className="text-xs text-slate-400">Tap a square to add that sound. Tap it again to remove it. Rolls play quick repeats, great for hi-hats.</p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 landscape:hidden">
             <button type="button" aria-pressed={page === 0} onClick={() => { setPage(0); setFollow(false); }} className={CHIP(page === 0)}>
               Steps 1–8
             </button>
@@ -1134,9 +1134,9 @@ export default function BeatBox({ modeLabel, onHome, onAdd, track, choiceId }: P
                 >
                   {d.short}
                 </button>
-                <div className="grid flex-1 grid-cols-8 gap-1">
-                  {pattern[r].slice(page * 8, page * 8 + 8).map((code, c) => {
-                    const i = page * 8 + c;
+                <div className="grid flex-1 grid-cols-8 gap-1 landscape:grid-cols-[repeat(16,minmax(0,1fr))]">
+                  {pattern[r].map((code, i) => {
+                    const onPage = Math.floor(i / 8) === page;
                     const rep = repeatsOf(code);
                     return (
                       <button
@@ -1145,7 +1145,7 @@ export default function BeatBox({ modeLabel, onHome, onAdd, track, choiceId }: P
                         aria-pressed={code > 0}
                         aria-label={`${d.label}, step ${i + 1}${code ? (rep > 1 ? `, roll of ${rep}` : code === 1 ? ', soft' : code === 3 ? ', loud' : ', on') : ', off'}`}
                         onClick={() => paint(r, i)}
-                        className={`flex h-11 items-center justify-center rounded-md border-2 text-xs font-black text-slate-950 ${FOCUS} ${
+                        className={`${onPage ? 'flex' : 'hidden landscape:flex'} h-11 landscape:h-9 items-center justify-center rounded-md border-2 text-xs font-black text-slate-950 ${FOCUS} ${
                           code ? `${d.on} ${code === 1 ? 'opacity-55' : ''} ${code === 3 ? 'ring-2 ring-white/80' : ''}` : i % 4 === 0 ? 'border-slate-600 bg-slate-800' : 'border-slate-700 bg-slate-900'
                         } ${activeStep === i ? 'outline outline-2 outline-white' : ''}`}
                       >
@@ -1182,7 +1182,7 @@ export default function BeatBox({ modeLabel, onHome, onAdd, track, choiceId }: P
               </button>
             ))}
           </div>
-          <ul className="space-y-3">
+          <ul className="space-y-3 landscape:grid landscape:grid-cols-2 landscape:gap-3 landscape:space-y-0">
             {shownBeats.map((b) => (
               <li key={b.id} className={`space-y-3 rounded-2xl border bg-slate-900 p-4 ${beatId === b.id ? 'border-pink-500' : 'border-slate-800'}`}>
                 <div className="flex items-start justify-between gap-3">
@@ -1264,7 +1264,7 @@ export default function BeatBox({ modeLabel, onHome, onAdd, track, choiceId }: P
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <header className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
+      <header className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3 landscape:hidden">
         <button
           type="button"
           onClick={() => {
@@ -1281,8 +1281,19 @@ export default function BeatBox({ modeLabel, onHome, onAdd, track, choiceId }: P
       </header>
 
       <div className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/95 px-4 py-2 backdrop-blur">
-        <div className="mx-auto max-w-xl space-y-2">
-          <div className="flex gap-2">
+        <div className="mx-auto max-w-xl space-y-2 landscape:flex landscape:max-w-none landscape:items-center landscape:gap-3 landscape:space-y-0">
+          <button
+            type="button"
+            aria-label="Back to my project"
+            onClick={() => {
+              stop();
+              onHome();
+            }}
+            className={`${BTN} hidden w-12 px-0 landscape:inline-flex landscape:items-center landscape:justify-center`}
+          >
+            ←
+          </button>
+          <div className="flex gap-2 landscape:flex-1">
             <button
               type="button"
               onClick={togglePlay}
@@ -1302,7 +1313,7 @@ export default function BeatBox({ modeLabel, onHome, onAdd, track, choiceId }: P
               ● Rec
             </button>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 landscape:flex-1">
             <button type="button" aria-label="Slower" onClick={() => changeBpm(bpm - 1)} className={`${BTN} w-12 px-0 text-xl`}>
               −
             </button>
@@ -1322,9 +1333,9 @@ export default function BeatBox({ modeLabel, onHome, onAdd, track, choiceId }: P
         </div>
       </div>
 
-      <main className="mx-auto max-w-xl space-y-4 px-4 py-4">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-black leading-tight">BeatBox</h1>
+      <main className="mx-auto max-w-xl space-y-4 px-4 py-4 landscape:max-w-none">
+        <div className="space-y-1 landscape:flex landscape:items-baseline landscape:gap-3 landscape:space-y-0">
+          <h1 className="text-3xl font-black leading-tight landscape:text-2xl">BeatBox</h1>
           <p className="text-slate-300">{beat ? `Now loaded: ${beat.name}` : 'Your own beat'}</p>
         </div>
 
