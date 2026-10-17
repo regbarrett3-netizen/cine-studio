@@ -5,13 +5,13 @@ import Workspace from './Workspace';
 export default function App() {
   const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
   const [showWorkspace, setShowWorkspace] = useState(false);
-if (showWorkspace) return <Workspace mode={selectedGoal ?? 'custom'} modeLabel={({ music: 'Make Just Music', 'music-video': 'Music + Music Video', 'movie-sfx': 'Movie + Sound Effects', 'full-movie': 'Movie + SFX + Soundtrack' } as Record<string, string>)[selectedGoal ?? ''] || 'Custom Project'} onBack={() => setShowWorkspace(false)} />;
+if (showWorkspace) return <Workspace mode={selectedGoal ?? 'custom'} modeLabel={({ music: 'Make Music', 'music-video': 'Music + Music Video', 'movie-sfx': 'Movie + Sound Effects', 'full-movie': 'Movie + SFX + Soundtrack' } as Record<string, string>)[selectedGoal ?? ''] || 'Custom Project'} onBack={() => setShowWorkspace(false)} />;
 
 
   const projectGoals = [
     {
       id: 'music',
-      title: 'Make Just Music',
+      title: 'Make Music',
       desc: 'Generate beat loops, stems, and full 808 audio tracks in seconds.',
       color: 'from-purple-500 to-indigo-500'
     },
