@@ -1276,7 +1276,7 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <header className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
+      <header className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3 landscape:hidden">
         <button
           type="button"
           onClick={() => {
@@ -1294,7 +1294,19 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
       </header>
 
       <div className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/95 px-4 py-2 backdrop-blur">
-        <div className="mx-auto flex max-w-xl gap-2">
+        <div className="mx-auto flex max-w-xl gap-2 landscape:max-w-none">
+          <button
+            type="button"
+            aria-label="Back to my project"
+            onClick={() => {
+              allOff();
+              stopRec();
+              onHome();
+            }}
+            className={`${BTN} hidden w-12 shrink-0 px-0 landscape:inline-flex landscape:items-center landscape:justify-center`}
+          >
+            ←
+          </button>
           <button
             type="button"
             aria-expanded={picker}
@@ -1316,22 +1328,22 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
         </div>
       </div>
 
-      <main className="mx-auto max-w-xl space-y-5 px-4 py-5">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-black leading-tight">Play an instrument!</h1>
-          <p className="leading-relaxed text-slate-300">
+      <main className="mx-auto flex max-w-xl flex-col gap-5 px-4 py-5 landscape:grid landscape:max-w-none landscape:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] landscape:items-start landscape:gap-x-5 landscape:gap-y-4 landscape:py-3">
+        <div className="space-y-1 landscape:col-span-2 landscape:flex landscape:items-baseline landscape:gap-3 landscape:space-y-0">
+          <h1 className="text-3xl font-black leading-tight landscape:text-2xl">Play an instrument!</h1>
+          <p className="leading-relaxed text-slate-300 landscape:text-sm">
             Pick an instrument, then tap the keys. Slide your finger to glide. You can press many keys at once.
           </p>
         </div>
 
         {audioError ? (
-          <p role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200">
+          <p role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 landscape:col-span-2">
             {audioError}
           </p>
         ) : null}
 
         {picker ? (
-          <section aria-label="Pick an instrument" className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-3">
+          <section aria-label="Pick an instrument" className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-3 landscape:col-span-2">
             <button
               type="button"
               aria-pressed={isSampler}
@@ -1384,20 +1396,20 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
         ) : null}
 
         {recError ? (
-          <p role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200">
+          <p role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 landscape:col-span-2">
             {recError}
           </p>
         ) : null}
 
         {recording ? (
-          <p role="status" className="flex items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 font-semibold text-red-200">
+          <p role="status" className="flex items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 font-semibold text-red-200 landscape:col-span-2">
             <span aria-hidden="true" className="inline-block h-3 w-3 animate-pulse rounded-full bg-red-500" />
             Recording what you play… tap Stop when you are done.
           </p>
         ) : null}
 
         {take ? (
-          <section className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-4" aria-label="Your recording">
+          <section className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-4 landscape:col-span-2" aria-label="Your recording">
             <p className="text-lg font-bold">Your music is {clock(take.secs)} long.</p>
             <audio key={take.url} src={take.url} controls className="w-full" />
             {added ? (
@@ -1426,7 +1438,7 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
         ) : null}
 
         {isSampler ? (
-          <>
+          <div className="flex flex-col gap-5 landscape:col-span-2">
             <SamplerPanel
               buf={sampBuf}
               trim={sampTrim}
@@ -1467,7 +1479,7 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
                 {sampHint}
               </p>
             ) : null}
-          </>
+          </div>
         ) : null}
 
         {/* ---- keyboard ---- */}
@@ -1528,8 +1540,8 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
             onPointerCancel={onUp}
             onLostPointerCapture={onUp}
             onContextMenu={(e) => e.preventDefault()}
-            className="relative w-full touch-none select-none overflow-hidden rounded-xl border-2 border-slate-700 bg-slate-800"
-            style={{ height: 'min(48vh, 300px)', WebkitTouchCallout: 'none', WebkitUserSelect: 'none' }}
+            className="relative h-[min(48vh,300px)] w-full touch-none select-none overflow-hidden rounded-xl border-2 border-slate-700 bg-slate-800 landscape:h-[min(66vh,270px)]"
+            style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none' }}
           >
             <div className="absolute inset-0 flex">
               {visibleWhites.map(({ m }) => {
@@ -1656,7 +1668,7 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
           </label>
         </section>
 
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-slate-400 landscape:col-span-2">
           These instruments are made inside your phone, so they work without internet. They are lifelike, not exact copies of the real thing. If you hear nothing on an iPhone, check that the silent switch is off.
         </p>
       </main>
