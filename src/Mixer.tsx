@@ -26,6 +26,7 @@ import {
   splitRegion,
   updateLibrarySeconds,
   valueAt,
+  wakeAudio,
 } from './mixEngine';
 import type { AudioClip, AutoMode, AutoPoint, AutoTarget, Channel, LibItem, Peaks, Region, Session } from './mixEngine';
 
@@ -631,12 +632,40 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
       return;
     }
     try {
-      await (eng.ctx as AudioContext).resume();
+      await unlock(eng);
     } catch {
       /* some browsers throw if already running */
     }
     setStatus('');
     startAt(timeRef.current);
+  };
+
+  const unlock = (eng: MixEngine) => wakeAudio(eng.ctx as AudioContext);
+
+  const testBeep = async () => {
+    const eng = getEngine();
+    if (!eng) return;
+    try {
+      await unlock(eng);
+      const ctx = eng.ctx as AudioContext;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.value = 440;
+      g.gain.setValueAtTime(0, ctx.currentTime);
+      g.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.02);
+      g.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.6);
+      o.connect(g);
+      g.connect(eng.master);
+      o.start();
+      o.stop(ctx.currentTime + 0.65);
+      setStatus(
+        ctx.state === 'running'
+          ? 'Beep sent. If you heard nothing: switch the silent switch on the side of the phone OFF, turn the volume up, and try again.'
+          : `The phone's sound is "${ctx.state}". Tap the beep again. If it stays that way, close other apps that use sound.`,
+      );
+    } catch {
+      setStatus('The beep could not play on this browser.');
+    }
   };
 
   const setPlayhead = (t: number) => {
@@ -1539,6 +1568,9 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
               <li>Switch to Trim and drag the edge of a wave to make it shorter or longer.</li>
               <li>On the Faders tab, move a fader to change the volume. Double-tap it to reset.</li>
             </ul>
+            <button type="button" onClick={() => void testBeep()} className={`${BTN} w-full`}>
+              🔊 Test beep (check my sound)
+            </button>
             <p className="font-bold">Record your fader moves (automation)</p>
             <ol className="list-decimal space-y-1.5 pl-5">
               <li>Tap the Auto button on a channel until it says Touch or Write.</li>
