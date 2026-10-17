@@ -265,10 +265,11 @@ export function SongReady({ mode, modeLabel, blob, seconds, onVideo, onHome }: R
     setSaving(true);
     setNote('');
     try {
-      const name = `my-${movie ? 'soundtrack' : 'song'}.wav`;
+      const ext = /mpeg|mp3/.test(blob.type) ? 'mp3' : 'wav';
+      const name = `my-${movie ? 'soundtrack' : 'song'}.${ext}`;
       const out = await saveToFiles(blob, name);
-      if (out === 'shared') setNote('Saved! If you picked "Save to Files", it is in your Files app.');
-      else if (out === 'downloaded') setNote('Saved! Look in your Downloads (the Files app on an iPhone).');
+      if (out === 'shared') setNote('Done! If you tapped "Save to Files" and picked a folder, your song is in the Files app, in that folder.');
+      else if (out === 'downloaded') setNote('Saved! Open the Files app on your phone and look in Downloads.');
     } catch {
       setNote('This phone could not save the file. Try again.');
     }
@@ -283,7 +284,8 @@ export function SongReady({ mode, modeLabel, blob, seconds, onVideo, onHome }: R
       onBack={onHome}
       backLabel="← Back to my project"
     >
-      {url ? <audio key={url} src={url} controls className="w-full" /> : null}
+      {url ? <audio key={url} src={url} controls playsInline className="w-full" /> : null}
+      <p className="text-lg font-bold">What next?</p>
       {note ? (
         <p role="status" className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 font-semibold text-emerald-200">
           {note}
@@ -292,7 +294,7 @@ export function SongReady({ mode, modeLabel, blob, seconds, onVideo, onHome }: R
       <div className="grid gap-3 landscape:grid-cols-2">
         <button type="button" onClick={() => void save()} disabled={saving} className={`${BTN_PRIMARY} min-h-[80px] text-2xl`}>
           💾 Save
-          <span className="mt-1 block text-sm font-semibold opacity-90">Save the file to Files</span>
+          <span className="mt-1 block text-sm font-semibold opacity-90">Tap this, then tap "Save to Files" in the menu</span>
         </button>
         <button type="button" onClick={onVideo} className={`${BTN_SECONDARY} min-h-[80px] text-2xl font-black`}>
           {movie ? '🎥 Movie Scenes' : '🎬 Music Video'}
