@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import {
   AUTO_MODES,
   CHANNELS,
+  EQ_MAX,
   FADER_UNITY,
   MAX_SECONDS,
   MixEngine,
@@ -15,6 +16,7 @@ import {
   getBlob,
   loadSession,
   mergeAutomation,
+  mergeSteps,
   nearestZero,
   newId,
   readLibrary,
@@ -24,6 +26,7 @@ import {
   saveToLibrary,
   sessionEnd,
   splitRegion,
+  stepAt,
   updateLibrarySeconds,
   valueAt,
   wakeAudio,
@@ -67,6 +70,12 @@ const MODE_HELP: Record<AutoMode, string> = {
 const STEPS_MS = [1, 10, 100, 1000];
 
 const readsAuto = (ch: Channel, pts: AutoPoint[]) => pts.length > 0 && (ch.mode === 'read' || ch.mode === 'touch' || ch.mode === 'latch');
+
+const ALL_TARGETS: AutoTarget[] = ['vol', 'pan', 'mute', 'solo'];
+const valOf = (c: Channel, t: AutoTarget): number => (t === 'vol' ? c.vol : t === 'pan' ? c.pan : t === 'mute' ? (c.mute ? 1 : 0) : c.solo ? 1 : 0);
+const laneOf = (c: Channel, t: AutoTarget): AutoPoint[] => (t === 'vol' ? c.autoVol : t === 'pan' ? c.autoPan : t === 'mute' ? c.autoMute : c.autoSolo);
+const withLane = (c: Channel, t: AutoTarget, pts: AutoPoint[]): Channel =>
+  t === 'vol' ? { ...c, autoVol: pts } : t === 'pan' ? { ...c, autoPan: pts } : t === 'mute' ? { ...c, autoMute: pts } : { ...c, autoSolo: pts };
 
 /* ---------- small immutable helpers ---------- */
 
@@ -352,7 +361,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
   const [tool, setTool] = useState<'move' | 'trim' | 'cursor'>('move');
   const [snapZero, setSnapZero] = useState(true);
   const [stepMs, setStepMs] = useState(10);
-  const [autoShow, setAutoShow] = useState<'vol' | 'pan' | 'none'>('vol');
+  const [autoShow, setAutoShow] = useState<'vol' | 'pan' | 'mute' | 'solo' | 'none'>('vol');
   const [follow, setFollow] = useState(true);
   const [selCh, setSelCh] = useState(0);
   const [selRegion, setSelRegion] = useState<string | null>(null);
@@ -519,7 +528,19 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
     } else {
       S.channels.forEach((c, i) => {
         const p = prev.channels[i];
-        if (c !== p && (c.vol !== p.vol || c.pan !== p.pan || c.mode !== p.mode || c.autoVol !== p.autoVol || c.autoPan !== p.autoPan)) eng.applyChannel(S, i);
+        if (
+          c !== p &&
+          (c.vol !== p.vol ||
+            c.pan !== p.pan ||
+            c.mode !== p.mode ||
+            c.autoVol !== p.autoVol ||
+            c.autoPan !== p.autoPan ||
+            c.autoMute !== p.autoMute ||
+            c.autoSolo !== p.autoSolo ||
+            c.eq !== p.eq ||
+            c.reverb !== p.reverb)
+        )
+          eng.applyChannel(S, i);
       });
       if (S.master !== prev.master) eng.applyAll(S);
     }
@@ -556,7 +577,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
     const key = `${i}:${target}`;
     if (writers.current.has(key)) return;
     const ch = SRef.current.channels[i];
-    writers.current.set(key, { i, target, startT: t, pts: [{ t, v: target === 'vol' ? ch.vol : ch.pan }] });
+    writers.current.set(key, { i, target, startT: t, pts: [{ t, v: valOf(ch, target) }] });
     engineRef.current?.setWriting(i, target, true);
     engineRef.current?.applyChannel(SRef.current, i, target);
   };
@@ -568,14 +589,15 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
     writers.current.delete(key);
     const t = Math.max(w.startT, eng.time);
     const ch = SRef.current.channels[w.i];
-    const last = w.target === 'vol' ? ch.vol : ch.pan;
+    const last = valOf(ch, w.target);
     const written = [...w.pts, { t, v: last }];
+    const stepped = w.target === 'mute' || w.target === 'solo';
     edit((s) =>
-      withChannel(s, w.i, (c) =>
-        w.target === 'vol'
-          ? { ...c, autoVol: mergeAutomation(c.autoVol, w.startT, t, written, c.vol) }
-          : { ...c, autoPan: mergeAutomation(c.autoPan, w.startT, t, written, c.pan) },
-      ),
+      withChannel(s, w.i, (c) => {
+        const old = laneOf(c, w.target);
+        const fb = valOf(c, w.target);
+        return withLane(c, w.target, stepped ? mergeSteps(old, w.startT, t, written, fb) : mergeAutomation(old, w.startT, t, written, fb));
+      }),
     );
     eng.setWriting(w.i, w.target, false);
     eng.applyChannel(SRef.current, w.i, w.target);
@@ -690,7 +712,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
     timeRef.current = t;
     writers.current.forEach((w) => {
       const ch = SRef.current.channels[w.i];
-      const v = w.target === 'vol' ? ch.vol : ch.pan;
+      const v = valOf(ch, w.target);
       const last = w.pts[w.pts.length - 1];
       if ((!last || Math.abs(last.v - v) > 0.002 || t - last.t > 0.25) && w.pts.length < 6000) w.pts.push({ t, v });
     });
@@ -758,7 +780,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
   const setMode = (i: number, next: AutoMode) => {
     if (playingRef.current) {
       // leaving a writing mode mid-play saves what was written so far
-      for (const key of [`${i}:vol`, `${i}:pan`]) if (writers.current.has(key)) endWrite(key);
+      for (const t of ALL_TARGETS) if (writers.current.has(`${i}:${t}`)) endWrite(`${i}:${t}`);
     }
     edit((s) => withChannel(s, i, (c) => ({ ...c, mode: next })));
     if (playingRef.current && next === 'write') {
@@ -766,8 +788,31 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
       beginWrite(i, 'pan', timeRef.current);
     }
   };
-  const onMute = (i: number) => setS(withChannel(SRef.current, i, (c) => ({ ...c, mute: !c.mute })));
-  const onSolo = (i: number) => setS(withChannel(SRef.current, i, (c) => ({ ...c, solo: !c.solo })));
+  const toggleFlag = (i: number, target: 'mute' | 'solo') => {
+    const cur = SRef.current;
+    const ch = cur.channels[i];
+    const writing = playingRef.current && (ch.mode === 'write' || ch.mode === 'touch' || ch.mode === 'latch');
+    if (!writing && readsAuto(ch, laneOf(ch, target))) {
+      setStatus(`Channel ${i + 1} is playing back its recorded ${target} moves. Set it to Write, Touch or Latch and press Play to record new ones, or clear them in the channel panel.`);
+      return;
+    }
+    if (writing) beginWrite(i, target, timeRef.current); // remembers the state before this tap
+    setS(withChannel(cur, i, (c) => (target === 'mute' ? { ...c, mute: !c.mute } : { ...c, solo: !c.solo })));
+  };
+  const onMute = (i: number) => toggleFlag(i, 'mute');
+  const onSolo = (i: number) => toggleFlag(i, 'solo');
+  const setShape = (i: number, patch: { low?: number; mid?: number; high?: number; reverb?: number }) =>
+    setS(
+      withChannel(SRef.current, i, (c) => ({
+        ...c,
+        eq: {
+          low: clamp(patch.low ?? c.eq.low, -EQ_MAX, EQ_MAX),
+          mid: clamp(patch.mid ?? c.eq.mid, -EQ_MAX, EQ_MAX),
+          high: clamp(patch.high ?? c.eq.high, -EQ_MAX, EQ_MAX),
+        },
+        reverb: clamp(patch.reverb ?? c.reverb, 0, 1),
+      })),
+    );
   const onSelect = (i: number) => {
     setSelCh(i);
     setSelRegion(null);
@@ -864,7 +909,16 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
         }
       }
       // automation line
-      if (autoShow !== 'none') {
+      if (autoShow === 'mute' || autoShow === 'solo') {
+        const pts = autoShow === 'mute' ? ch.autoMute : ch.autoSolo;
+        g.fillStyle = autoShow === 'mute' ? 'rgba(244,63,94,0.35)' : 'rgba(251,191,36,0.35)';
+        for (let q = 0; q < pts.length; q++) {
+          if (pts[q].v < 0.5) continue;
+          const xa = q === 0 ? -10 : xOf(pts[q].t);
+          const xb = q + 1 < pts.length ? xOf(pts[q + 1].t) : width + 10;
+          g.fillRect(xa, y + 2, Math.max(2, xb - xa), LANE - 4);
+        }
+      } else if (autoShow !== 'none') {
         const pts = autoShow === 'vol' ? ch.autoVol : ch.autoPan;
         if (pts.length > 0) {
           g.strokeStyle = '#fde047';
@@ -1373,11 +1427,60 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
   const anySounds = S.channels.some((c) => c.regions.length > 0);
   const selChan = S.channels[selCh];
   const span = width / view.pps;
-  const shown = (c: Channel, target: AutoTarget) => {
+  const shown = (c: Channel, target: 'vol' | 'pan') => {
     const pts = target === 'vol' ? c.autoVol : c.autoPan;
     const base = target === 'vol' ? c.vol : c.pan;
-    return readsAuto(c, pts) ? valueAt(pts, time, base) : base;
+    const idx = S.channels.indexOf(c);
+    const live = writers.current.has(`${idx}:${target}`); // while you are recording, the fader is yours
+    return !live && readsAuto(c, pts) ? valueAt(pts, time, base) : base;
   };
+  const shownFlag = (c: Channel, target: 'mute' | 'solo') => {
+    const pts = target === 'mute' ? c.autoMute : c.autoSolo;
+    const base = target === 'mute' ? c.mute : c.solo;
+    const idx = S.channels.indexOf(c);
+    const live = writers.current.has(`${idx}:${target}`);
+    return !live && readsAuto(c, pts) ? stepAt(pts, time, 0) >= 0.5 : base;
+  };
+
+  const shaped = (c: Channel) => c.eq.low !== 0 || c.eq.mid !== 0 || c.eq.high !== 0 || c.reverb > 0;
+  const shapeSlider = (label: string, value: number, min: number, max: number, step: number, show: string, onChange: (v: number) => void) => (
+    <label className="block space-y-1">
+      <span className="flex justify-between text-base font-bold">
+        <span>{label}</span>
+        <span className="tabular-nums text-slate-400">{show}</span>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-label={`${label} of channel ${selCh + 1}`}
+        onChange={(e) => onChange(Number(e.target.value))}
+        onDoubleClick={() => onChange(0)}
+        className="h-11 w-full accent-pink-500"
+      />
+    </label>
+  );
+  const dbShow = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`;
+  const shape = (
+    <section aria-label={`Sound shaping for channel ${selCh + 1}`} className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-3">
+      <div className="flex items-center gap-2">
+        <span className="rounded-md px-2 py-1 text-sm font-black text-slate-950" style={{ background: selChan.color }}>
+          {selCh + 1}
+        </span>
+        <p className="text-lg font-black">🎛️ Sound shaping: {selChan.name}</p>
+      </div>
+      {shapeSlider('Low (bass)', selChan.eq.low, -EQ_MAX, EQ_MAX, 0.5, dbShow(selChan.eq.low), (v) => setShape(selCh, { low: v }))}
+      {shapeSlider('Mid (voice)', selChan.eq.mid, -EQ_MAX, EQ_MAX, 0.5, dbShow(selChan.eq.mid), (v) => setShape(selCh, { mid: v }))}
+      {shapeSlider('High (sparkle)', selChan.eq.high, -EQ_MAX, EQ_MAX, 0.5, dbShow(selChan.eq.high), (v) => setShape(selCh, { high: v }))}
+      {shapeSlider('Reverb', selChan.reverb, 0, 1, 0.01, `${Math.round(selChan.reverb * 100)}%`, (v) => setShape(selCh, { reverb: v }))}
+      <p className="text-sm text-slate-400">Reverb makes the sound echo like a room. These are saved with your mix and used when you mix down.</p>
+      <button type="button" disabled={!shaped(selChan)} onClick={() => setShape(selCh, { low: 0, mid: 0, high: 0, reverb: 0 })} className={`${BTN} w-full disabled:opacity-40`}>
+        Reset this channel's sound
+      </button>
+    </section>
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -1576,6 +1679,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
               <li>Tap the Auto button on a channel until it says Touch or Write.</li>
               <li>Press Play and move that channel's fader or pan while the song plays.</li>
               <li>Press Stop. Set the channel to Read, press Play, and watch the fader move by itself.</li>
+              <li>Mute and solo work the same way: with the channel on Write, Touch or Latch, tap M or S while the song plays. The tap is recorded.</li>
             </ol>
             <ul className="space-y-1 text-sm text-slate-300">
               {AUTO_MODES.map((m) => (
@@ -1659,11 +1763,13 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
                 Show recorded moves:
                 <select
                   value={autoShow}
-                  onChange={(e) => setAutoShow(e.target.value as 'vol' | 'pan' | 'none')}
+                  onChange={(e) => setAutoShow(e.target.value as 'vol' | 'pan' | 'mute' | 'solo' | 'none')}
                   className={`min-h-[44px] flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2 text-base ${FOCUS}`}
                 >
                   <option value="vol">Volume (yellow line)</option>
                   <option value="pan">Pan (yellow line)</option>
+                  <option value="mute">Mute (red bands)</option>
+                  <option value="solo">Solo (gold bands)</option>
                   <option value="none">Hide</option>
                 </select>
               </label>
@@ -1691,19 +1797,19 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
                     <div className="flex gap-1">
                       <button
                         type="button"
-                        aria-pressed={c.mute}
+                        aria-pressed={shownFlag(c, 'mute')}
                         aria-label={`Mute channel ${i + 1}`}
                         onClick={() => onMute(i)}
-                        className={`h-7 flex-1 rounded text-xs font-black ${c.mute ? 'bg-rose-600 text-white' : 'bg-slate-800 text-slate-300'} ${FOCUS}`}
+                        className={`h-7 flex-1 rounded text-xs font-black ${shownFlag(c, 'mute') ? 'bg-rose-600 text-white' : 'bg-slate-800 text-slate-300'} ${FOCUS}`}
                       >
                         M
                       </button>
                       <button
                         type="button"
-                        aria-pressed={c.solo}
+                        aria-pressed={shownFlag(c, 'solo')}
                         aria-label={`Solo channel ${i + 1}`}
                         onClick={() => onSolo(i)}
-                        className={`h-7 flex-1 rounded text-xs font-black ${c.solo ? 'bg-amber-400 text-slate-950' : 'bg-slate-800 text-slate-300'} ${FOCUS}`}
+                        className={`h-7 flex-1 rounded text-xs font-black ${shownFlag(c, 'solo') ? 'bg-amber-400 text-slate-950' : 'bg-slate-800 text-slate-300'} ${FOCUS}`}
                       >
                         S
                       </button>
@@ -1775,8 +1881,18 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
                 >
                   Clear pan moves
                 </button>
+                <button
+                  type="button"
+                  disabled={selChan.autoMute.length === 0 && selChan.autoSolo.length === 0}
+                  onClick={() => edit((s) => withChannel(s, selCh, (c) => ({ ...c, autoMute: [], autoSolo: [] })))}
+                  className={`${BTN} col-span-2 text-sm disabled:opacity-40`}
+                >
+                  Clear mute and solo moves
+                </button>
               </div>
             </section>
+
+            {shape}
 
             {/* selected sound */}
             <section aria-label="Edit the picked sound" className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-3">
@@ -1872,6 +1988,7 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
             </section>
           </>
         ) : (
+          <>
           <section aria-label="Faders" className="space-y-2">
             <p className="px-1 text-sm text-slate-400">Slide sideways to see all 24 channels. The big strip on the right is the master volume.</p>
             <div className="flex gap-2">
@@ -1885,10 +2002,10 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
                       color={c.color}
                       vol={shown(c, 'vol')}
                       pan={shown(c, 'pan')}
-                      mute={c.mute}
-                      solo={c.solo}
+                      mute={shownFlag(c, 'mute')}
+                      solo={shownFlag(c, 'solo')}
                       mode={c.mode}
-                      hasAuto={c.autoVol.length > 0 || c.autoPan.length > 0}
+                      hasAuto={c.autoVol.length > 0 || c.autoPan.length > 0 || c.autoMute.length > 0 || c.autoSolo.length > 0}
                       hasSounds={c.regions.length > 0}
                       selected={i === selCh}
                       onControl={onControl}
@@ -1916,6 +2033,8 @@ export default function Mixer({ mode, modeLabel, onHome, onAdd }: Props) {
               </div>
             </div>
           </section>
+          {shape}
+          </>
         )}
       </main>
     </div>
