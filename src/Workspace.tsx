@@ -245,6 +245,8 @@ function PromptStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState('');
   const [wait, setWait] = useState(0);
+  const [lyrics, setLyrics] = useState('');
+  const [lyricsFile, setLyricsFile] = useState('');
   const [songUrl, setSongUrl] = useState('');
   const ready = text.trim().length >= 3;
 
@@ -258,7 +260,8 @@ function PromptStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
     if (choice.kind === 'music') {
       try {
         setWait(0);
-        const made = await generateMusic(idea, setWait);
+        const words = lyrics.trim();
+        const made = await generateMusic(words ? `${idea}\n\nLyrics:\n${words}`.slice(0, 3400) : idea, setWait);
         onAdd({ name: shorten(`${cfg.label}: ${idea}`), type: 'audio', duration: Math.min(made.seconds, MAX_CLIP_SECONDS), track: choice.track, from: choice.id, blob: made.blob });
         setSongUrl(URL.createObjectURL(made.blob));
         setMessage('Your song is ready and added to your project! Tap play to hear it.');
@@ -317,8 +320,26 @@ function PromptStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
     setPhase('done');
   };
 
+  const pickLyrics = async (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    setNotice('');
+    try {
+      if (f.size > 200 * 1024) throw new Error('big');
+      const t = (await f.text()).replace(/\u0000/g, '').trim();
+      if (!t || /[\u0000-\u0008]/.test(t.slice(0, 200))) throw new Error('bin');
+      setLyrics(t.slice(0, 1500));
+      setLyricsFile(f.name);
+    } catch {
+      setNotice('That did not work as lyrics. Pick a small text file (.txt), or paste your words below.');
+    }
+  };
+
   const again = () => {
     setText('');
+    setLyrics('');
+    setLyricsFile('');
     setNotice('');
     setSongUrl('');
     setPhase('typing');
@@ -368,6 +389,24 @@ function PromptStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
               ))}
             </div>
           </div>
+
+          {choice.kind === 'music' ? (
+            <div className="space-y-2">
+              <p className="text-lg font-bold">Lyrics (optional)</p>
+              <label className="flex min-h-[56px] cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-pink-500/60 bg-slate-900 px-3 text-lg font-bold focus-within:outline focus-within:outline-4 focus-within:outline-white">
+                <span aria-hidden="true">📄</span> {lyricsFile ? `✓ ${shorten(lyricsFile, 28)}` : 'Upload my lyrics'}
+                <input type="file" accept=".txt,.lrc,.md,text/plain" onChange={(e) => void pickLyrics(e)} className="sr-only" aria-label="Upload a lyrics file" />
+              </label>
+              <textarea
+                value={lyrics}
+                onChange={(e) => setLyrics(e.target.value.slice(0, 1500))}
+                rows={5}
+                aria-label="Lyrics text"
+                placeholder="Or type or paste your words here. The AI will sing them."
+                className="w-full rounded-2xl border-2 border-slate-700 bg-slate-900 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-pink-500 focus:outline-none"
+              />
+            </div>
+          ) : null}
 
           {phase === 'working' && choice.kind === 'music' && wait > 0 ? (
             <p role="status" className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-slate-200">
