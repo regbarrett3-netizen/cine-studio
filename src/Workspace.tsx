@@ -4,6 +4,7 @@ import BeatBox from './BeatBox';
 import Keys from './Keys';
 import Mixer from './Mixer';
 import { saveToLibrary } from './mixEngine';
+import { generateMusic } from './musicApi';
 import type { AudioClip } from './mixEngine';
 import { INSTRUMENTS } from './instruments';
 import Editor, { addClipToProject, readProjectClips } from './Editor';
@@ -243,6 +244,8 @@ function PromptStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
   const [phase, setPhase] = useState<'typing' | 'working' | 'done'>('typing');
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState('');
+  const [wait, setWait] = useState(0);
+  const [songUrl, setSongUrl] = useState('');
   const ready = text.trim().length >= 3;
 
   const submit = async () => {
@@ -252,7 +255,30 @@ function PromptStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
     setPhase('working');
 
     let outcome: 'sent' | 'soon' | 'busy' = 'soon';
-    if (GENERATION_IS_LIVE) {
+    if (choice.kind === 'music') {
+      try {
+        setWait(0);
+        const made = await generateMusic(idea, setWait);
+        onAdd({ name: shorten(`${cfg.label}: ${idea}`), type: 'audio', duration: Math.min(made.seconds, MAX_CLIP_SECONDS), track: choice.track, from: choice.id, blob: made.blob });
+        setSongUrl(URL.createObjectURL(made.blob));
+        setMessage('Your song is ready and added to your project! Tap play to hear it.');
+        setPhase('done');
+        return;
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        if (code === 'busy') {
+          setNotice('Lots of people are making songs right now. Wait a minute, then tap the button again.');
+          setPhase('typing');
+          return;
+        }
+        if (code !== 'off') {
+          setNotice('The song did not finish. Nothing was lost. Tap the button to try again.');
+          setPhase('typing');
+          return;
+        }
+        outcome = 'soon';
+      }
+    } else if (GENERATION_IS_LIVE) {
       const controller = new AbortController();
       const timer = window.setTimeout(() => controller.abort(), 15000);
       try {
@@ -294,13 +320,17 @@ function PromptStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
   const again = () => {
     setText('');
     setNotice('');
+    setSongUrl('');
     setPhase('typing');
   };
 
   return (
     <Screen title={cfg.heading} subtitle={cfg.help} modeLabel={modeLabel} onBack={onHome} backLabel="← Back to my project">
       {phase === 'done' ? (
-        <DonePanel message={message} againLabel="Make another idea" onAgain={again} onHome={onHome} />
+        <>
+          <DonePanel message={message} againLabel="Make another idea" onAgain={again} onHome={onHome} />
+          {songUrl ? <audio controls src={songUrl} className="w-full" aria-label="Your new song" /> : null}
+        </>
       ) : (
         <>
           <div className="space-y-2">
@@ -334,6 +364,11 @@ function PromptStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
             </div>
           </div>
 
+          {phase === 'working' && choice.kind === 'music' && wait > 0 ? (
+            <p role="status" className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-slate-200">
+              🎶 Making your song… {wait} seconds. This usually takes about a minute. Keep this screen open.
+            </p>
+          ) : null}
           {notice ? (
             <p role="alert" className="rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 px-4 py-3">
               {notice}
