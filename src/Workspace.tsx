@@ -232,13 +232,14 @@ interface ActivityProps {
   modeLabel: string;
   onHome: () => void;
   onAdd: (clip: AudioClip) => void;
+  onSong?: (blob: Blob, seconds: number) => void;
 }
 
 /* ------------------------------------------------------------------ */
 /* Type an idea for the AI                                             */
 /* ------------------------------------------------------------------ */
 
-function PromptStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
+function PromptStep({ choice, modeLabel, onHome, onAdd, onSong }: ActivityProps) {
   const cfg = PROMPTS[choice.kind];
   const [text, setText] = useState('');
   const [phase, setPhase] = useState<'typing' | 'working' | 'done'>('typing');
@@ -263,6 +264,10 @@ function PromptStep({ choice, modeLabel, onHome, onAdd }: ActivityProps) {
         const words = lyrics.trim();
         const made = await generateMusic(words ? `${idea}\n\nLyrics:\n${words}`.slice(0, 3400) : idea, setWait);
         onAdd({ name: shorten(`${cfg.label}: ${idea}`), type: 'audio', duration: Math.min(made.seconds, MAX_CLIP_SECONDS), track: choice.track, from: choice.id, blob: made.blob });
+        if (onSong) {
+          onSong(made.blob, made.seconds);
+          return;
+        }
         setSongUrl(URL.createObjectURL(made.blob));
         setMessage('Your song is ready and added to your project! Tap play to hear it.');
         setPhase('done');
@@ -1100,7 +1105,16 @@ export default function Workspace({ mode, modeLabel, onBack }: WorkspaceProps) {
   }
 
   if (view.name === 'activity') {
-    const props: ActivityProps = { choice: view.choice, modeLabel, onHome: goHome, onAdd: addClip };
+    const props: ActivityProps = {
+      choice: view.choice,
+      modeLabel,
+      onHome: goHome,
+      onAdd: addClip,
+      onSong: (blob, seconds) => {
+        setSong(true);
+        setView({ name: 'ready', blob, seconds });
+      },
+    };
     if (view.choice.action === 'prompt') return <PromptStep key={view.choice.id} {...props} />;
     if (view.choice.action === 'upload') return <UploadStep key={view.choice.id} {...props} />;
     if (view.choice.action === 'record') return <RecordStep key={view.choice.id} {...props} />;
