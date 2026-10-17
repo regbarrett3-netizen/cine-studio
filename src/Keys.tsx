@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { AudioClip } from './mixEngine';
-import { decodeBlob, encodeWav, wakeAudio } from './mixEngine';
+import { decodeBlob, delBlob, encodeWav, getBlob, newId, putBlob, wakeAudio } from './mixEngine';
 import {
   CHORDS,
   FAMILY_LIST,
@@ -96,7 +96,7 @@ function loadSaved(): Saved {
     const p = JSON.parse(raw) as Partial<Saved>;
     const n = (v: unknown, lo: number, hi: number, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
     return {
-      inst: typeof p.inst === 'string' && INST_BY_ID[p.inst] ? p.inst : DEFAULTS.inst,
+      inst: typeof p.inst === 'string' && (INST_BY_ID[p.inst] || p.inst === SAMPLER_ID) ? p.inst : DEFAULTS.inst,
       start: p.start === null || p.start === undefined ? null : n(p.start, 0, TOTAL_WHITES - 1, 0),
       zoom: p.zoom === 'small' ? 'small' : 'big',
       vol: n(p.vol, 0, 1, DEFAULTS.vol),
@@ -210,7 +210,67 @@ function makePlayBuffer(ctx: BaseAudioContext, buf: AudioBuffer, start: number, 
   return out;
 }
 
+/* ---------- samples kept on this phone ---------- */
+
+interface SampleMeta {
+  id: string;
+  name: string;
+  secs: number;
+  at: number;
+  root: number;
+  loop: boolean;
+  pitched: boolean;
+  oneShot: boolean;
+  reverse: boolean;
+  start: number;
+  end: number;
+}
+
+const SAMPLES_KEY = 'cine-samples-v1';
+const SAMPLE_LAST = 'cine-sample-last';
+const MAX_SAVED_SAMPLES = 20;
+
+function readSamples(): SampleMeta[] {
+  try {
+    const raw = window.localStorage.getItem(SAMPLES_KEY);
+    const list = raw ? (JSON.parse(raw) as SampleMeta[]) : [];
+    if (!Array.isArray(list)) return [];
+    const n = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+    return list
+      .filter((s) => s && typeof s.id === 'string' && typeof s.name === 'string')
+      .slice(0, MAX_SAVED_SAMPLES)
+      .map((s) => ({
+        id: s.id,
+        name: s.name.slice(0, 30),
+        secs: n(s.secs, 0),
+        at: n(s.at, 0),
+        root: Math.min(84, Math.max(36, n(s.root, 60))),
+        loop: s.loop === true,
+        pitched: s.pitched !== false,
+        oneShot: s.oneShot !== false,
+        reverse: s.reverse === true,
+        start: Math.max(0, n(s.start, 0)),
+        end: Math.max(0, n(s.end, 0)),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function writeSamples(list: SampleMeta[]) {
+  try {
+    window.localStorage.setItem(SAMPLES_KEY, JSON.stringify(list));
+  } catch {
+    /* storage blocked */
+  }
+}
+
 interface SamplerPanelProps {
+  saved: SampleMeta[];
+  currentId: string | null;
+  note: string;
+  onLoad: (id: string) => void;
+  onDelete: (id: string) => void;
   buf: AudioBuffer | null;
   trim: { start: number; end: number };
   opts: SamplerOpts;
@@ -575,6 +635,38 @@ function SamplerPanel(p: SamplerPanelProps) {
           </button>
         </div>
       ) : null}
+
+      {p.note ? (
+        <p role="status" className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-200">
+          {p.note}
+        </p>
+      ) : null}
+      {p.saved.length > 0 ? (
+        <div className="space-y-2" aria-label="My saved samples" role="group">
+          <p className="text-base font-bold">📚 My saved samples</p>
+          <p className="text-sm text-slate-400">Every sample you record is kept on this phone. Tap one to use it again.</p>
+          <ul className="space-y-2">
+            {p.saved.map((s) => (
+              <li key={s.id} className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-pressed={s.id === p.currentId}
+                  onClick={() => p.onLoad(s.id)}
+                  className={`flex min-h-[56px] min-w-0 flex-1 items-center justify-between gap-2 rounded-xl border px-3 text-left text-base font-semibold ${FOCUS} ${
+                    s.id === p.currentId ? 'border-pink-500 bg-pink-500/10 text-white' : 'border-slate-700 bg-slate-950 text-slate-100 hover:border-slate-500'
+                  }`}
+                >
+                  <span className="truncate">{s.name}</span>
+                  <span className="shrink-0 text-slate-400">{s.secs.toFixed(1)} s</span>
+                </button>
+                <button type="button" aria-label={`Delete ${s.name}`} onClick={() => p.onDelete(s.id)} className={`${BTN} min-w-[56px] px-0`}>
+                  🗑️
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -586,7 +678,7 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
   const [zoom, setZoom] = useState<Zoom>(saved.zoom);
   const [start, setStart] = useState<number>(() => {
     const w = ZOOMS[saved.zoom].whites;
-    return saved.start === null ? startIdxFor(INST_BY_ID[saved.inst].home, w) : Math.min(saved.start, TOTAL_WHITES - w);
+    return saved.start === null ? startIdxFor((INST_BY_ID[saved.inst] ?? SAMPLER_INST).home, w) : Math.min(saved.start, TOTAL_WHITES - w);
   });
   const [vol, setVol] = useState(saved.vol);
   const [reverb, setReverb] = useState(saved.reverb);
@@ -597,7 +689,7 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
   const [touchVel, setTouchVel] = useState(saved.touchVel);
   const [hold, setHold] = useState(false);
   const [picker, setPicker] = useState(false);
-  const [family, setFamily] = useState<FamilyName>(INST_BY_ID[saved.inst].family);
+  const [family, setFamily] = useState<FamilyName>((INST_BY_ID[saved.inst] ?? INST_BY_ID[DEFAULTS.inst]).family);
   const [lit, setLit] = useState<ReadonlySet<number>>(new Set());
   const [audioError, setAudioError] = useState('');
   const [sampBuf, setSampBuf] = useState<AudioBuffer | null>(null);
@@ -605,6 +697,9 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
   const [sampOpts, setSampOpts] = useState<SamplerOpts>(SAMPLER_DEFAULTS);
   const [sampAdded, setSampAdded] = useState(false);
   const [sampHint, setSampHint] = useState('');
+  const [samples, setSamples] = useState<SampleMeta[]>(readSamples);
+  const [sampleId, setSampleId] = useState<string | null>(null);
+  const [sampNote, setSampNote] = useState('');
 
   const [recording, setRecording] = useState(false);
   const [recSecs, setRecSecs] = useState(0);
@@ -629,6 +724,8 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
   const takeUrlRef = useRef<string | null>(null);
   const previewTimers = useRef<number[]>([]);
   const playBufRef = useRef<AudioBuffer | null>(null);
+  const samplesRef = useRef<SampleMeta[]>([]);
+  samplesRef.current = samples;
   const sampOptsRef = useRef<SamplerOpts>(SAMPLER_DEFAULTS);
   sampOptsRef.current = sampOpts;
 
@@ -903,6 +1000,93 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
     a.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 30000);
   };
+
+  const commitSamples = (list: SampleMeta[]) => {
+    samplesRef.current = list;
+    setSamples(list);
+    writeSamples(list);
+  };
+
+  const keepSample = (b: AudioBuffer) => {
+    const id = newId();
+    setSampleId(id);
+    setSampNote('');
+    void (async () => {
+      try {
+        await putBlob(`sample-${id}`, encodeWav(b));
+        const n = samplesRef.current.reduce((m, s) => Math.max(m, Number(/(\d+)$/.exec(s.name)?.[1] ?? 0)), 0) + 1;
+        const meta: SampleMeta = { id, name: `Sample ${n}`, secs: b.duration, at: Date.now(), ...sampOptsRef.current, start: 0, end: b.duration };
+        let list = [meta, ...samplesRef.current];
+        while (list.length > MAX_SAVED_SAMPLES) {
+          const old = list[list.length - 1];
+          list = list.slice(0, -1);
+          void delBlob(`sample-${old.id}`).catch(() => undefined);
+        }
+        commitSamples(list);
+        window.localStorage.setItem(SAMPLE_LAST, id);
+        setSampNote(`Saved as ${meta.name}. It will still be here next time.`);
+      } catch {
+        setSampNote('This phone could not keep the sample for later. It still works until you close the page.');
+      }
+    })();
+  };
+
+  const loadSample = async (id: string) => {
+    const meta = samplesRef.current.find((s) => s.id === id);
+    if (!meta) return;
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    try {
+      const blob = await getBlob(`sample-${id}`);
+      if (!blob) throw new Error('gone');
+      const b = await decodeBlob(ctx, blob);
+      setSampBuf(b);
+      const end = meta.end > meta.start + 0.05 ? Math.min(meta.end, b.duration) : b.duration;
+      setSampTrim({ start: Math.min(meta.start, Math.max(0, end - 0.05)), end });
+      setSampOpts({ root: meta.root, loop: meta.loop, pitched: meta.pitched, oneShot: meta.oneShot, reverse: meta.reverse });
+      setSampleId(id);
+      setSampAdded(false);
+      setSampHint('');
+      setSampNote(`${meta.name} is ready on the keys.`);
+      window.localStorage.setItem(SAMPLE_LAST, id);
+    } catch {
+      setSampNote('That sample could not be opened, so it was removed from the list.');
+      commitSamples(samplesRef.current.filter((s) => s.id !== id));
+    }
+  };
+
+  const deleteSample = (id: string) => {
+    void delBlob(`sample-${id}`).catch(() => undefined);
+    commitSamples(samplesRef.current.filter((s) => s.id !== id));
+    if (id === sampleId) {
+      setSampBuf(null);
+      setSampleId(null);
+    }
+    setSampNote('Sample deleted.');
+  };
+
+  // remember the trim and the switches for the sample you are using
+  useEffect(() => {
+    if (!sampleId) return;
+    const t = window.setTimeout(() => {
+      if (!samplesRef.current.some((s) => s.id === sampleId)) return;
+      commitSamples(samplesRef.current.map((s) => (s.id === sampleId ? { ...s, ...sampOpts, start: sampTrim.start, end: sampTrim.end } : s)));
+    }, 500);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sampleId, sampOpts, sampTrim.start, sampTrim.end]);
+
+  // coming back with the sampler picked: bring back the sample you used last
+  useEffect(() => {
+    if (saved.inst !== SAMPLER_ID) return;
+    try {
+      const last = window.localStorage.getItem(SAMPLE_LAST);
+      if (last && samplesRef.current.some((s) => s.id === last)) void loadSample(last);
+    } catch {
+      /* ok */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const hearSample = () => {
     const ctx = ensureAudio();
@@ -1256,7 +1440,13 @@ export default function Keys({ modeLabel, onHome, onAdd, track, choiceId }: Prop
                 setSampOpts(o);
                 setSampAdded(false);
               }}
+              saved={samples}
+              currentId={sampleId}
+              note={sampNote}
+              onLoad={(id) => void loadSample(id)}
+              onDelete={deleteSample}
               onRecorded={(b) => {
+                keepSample(b);
                 setSampBuf(b);
                 setSampTrim({ start: 0, end: b.duration });
                 setSampAdded(false);
