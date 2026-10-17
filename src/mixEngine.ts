@@ -4,6 +4,7 @@
 /* ==================================================================== */
 
 import type { NewClip } from './Editor';
+import { makeReverbImpulse } from './instruments';
 
 /** A clip handed to the project. Sounds can carry their audio so the mixer can use them. */
 export type AudioClip = NewClip & { blob?: Blob };
@@ -152,7 +153,13 @@ export const MAX_SECONDS = 600;
 
 export type AutoMode = 'off' | 'read' | 'write' | 'touch' | 'latch';
 export const AUTO_MODES: AutoMode[] = ['off', 'read', 'write', 'touch', 'latch'];
-export type AutoTarget = 'vol' | 'pan';
+export type AutoTarget = 'vol' | 'pan' | 'mute' | 'solo';
+export const EQ_MAX = 12; // dB either way
+export interface Eq {
+  low: number;
+  mid: number;
+  high: number;
+}
 
 export interface AutoPoint {
   t: number; // timeline seconds
@@ -181,6 +188,10 @@ export interface Channel {
   mode: AutoMode;
   autoVol: AutoPoint[];
   autoPan: AutoPoint[];
+  autoMute: AutoPoint[]; // steps: v >= 0.5 means muted
+  autoSolo: AutoPoint[];
+  eq: Eq;
+  reverb: number; // 0..1 send
   regions: Region[];
 }
 
@@ -204,6 +215,10 @@ export function newChannel(i: number): Channel {
     mode: 'off',
     autoVol: [],
     autoPan: [],
+    autoMute: [],
+    autoSolo: [],
+    eq: { low: 0, mid: 0, high: 0 },
+    reverb: 0,
     regions: [],
   };
 }
@@ -251,6 +266,43 @@ export function valueAt(points: AutoPoint[], t: number, fallback: number): numbe
   const b = points[hi];
   const span = b.t - a.t;
   return span <= 0 ? b.v : a.v + ((b.v - a.v) * (t - a.t)) / span;
+}
+
+/** Value of a stepped lane (mute, solo): it holds until the next point. */
+export function stepAt(points: AutoPoint[], t: number, fallback: number): number {
+  const n = points.length;
+  if (n === 0) return fallback;
+  if (t < points[0].t) return points[0].v;
+  let lo = 0;
+  let hi = n - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (points[mid].t <= t) lo = mid;
+    else hi = mid - 1;
+  }
+  return points[lo].v;
+}
+
+/** Like mergeAutomation but for stepped lanes: values hold, so nothing is smoothed. */
+export function mergeSteps(old: AutoPoint[], startT: number, endT: number, written: AutoPoint[], fallback: number): AutoPoint[] {
+  if (written.length === 0) return old;
+  const before = old.filter((p) => p.t < startT);
+  const after = old.filter((p) => p.t > endT);
+  const out: AutoPoint[] = [...before];
+  if (old.length > 0 && startT > 0.002) out.push({ t: Math.max(0, startT - 0.002), v: stepAt(old, startT, fallback) });
+  out.push(...written);
+  out.sort((a, b) => a.t - b.t);
+  if (after.length > 0) out.push({ t: endT + 0.002, v: stepAt(old, endT, fallback) });
+  out.push(...after);
+  const clean: AutoPoint[] = [];
+  for (const p of out) {
+    const last = clean[clean.length - 1];
+    if (last && p.t <= last.t) {
+      if (p.t < last.t - 1e-6) continue;
+      last.v = p.v;
+    } else if (!last || last.v !== p.v) clean.push({ t: p.t, v: p.v });
+  }
+  return clean.slice(0, MAX_AUTO_POINTS);
 }
 
 /** Drop points that lie on a straight line between their neighbours. */
@@ -328,6 +380,12 @@ export function loadSession(mode: string): Session {
         Array.isArray(a) ? a.filter((q) => q && Number.isFinite(q.t) && Number.isFinite(q.v)).map((q) => ({ t: q.t, v: q.v })).slice(0, MAX_AUTO_POINTS) : [];
       d.autoVol = pts(c.autoVol);
       d.autoPan = pts(c.autoPan);
+      d.autoMute = pts(c.autoMute);
+      d.autoSolo = pts(c.autoSolo);
+      const e = (c.eq ?? {}) as Partial<Eq>;
+      const eqv = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? clamp(x, -EQ_MAX, EQ_MAX) : 0);
+      d.eq = { low: eqv(e.low), mid: eqv(e.mid), high: eqv(e.high) };
+      d.reverb = typeof c.reverb === 'number' && Number.isFinite(c.reverb) ? clamp(c.reverb, 0, 1) : 0;
       d.regions = Array.isArray(c.regions)
         ? c.regions
             .filter((r) => r && typeof r.item === 'string' && Number.isFinite(r.start) && Number.isFinite(r.length) && r.length > 0)
@@ -467,20 +525,15 @@ export function nearestZero(buf: AudioBuffer, timeSec: number, radiusSec = 0.01)
 
 interface ChannelNodes {
   fader: GainNode;
-  pan: AudioParam; // -1 (left) .. 1 (right), a balance control
+  panL: AudioParam; // balance: left side level
+  panR: AudioParam; // balance: right side level
   gate: GainNode; // mute and solo
+  lo: BiquadFilterNode;
+  mid: BiquadFilterNode;
+  hi: BiquadFilterNode;
+  send: GainNode; // to the shared reverb
   input: GainNode;
   meter: AnalyserNode;
-}
-
-function balanceCurve(side: 'L' | 'R') {
-  const n = 513;
-  const c = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const p = (i / (n - 1)) * 2 - 1;
-    c[i] = side === 'L' ? Math.min(1, 1 - p) : Math.min(1, 1 + p);
-  }
-  return c;
 }
 
 function limiterCurve() {
@@ -495,6 +548,7 @@ export class MixEngine {
   readonly nodes: ChannelNodes[] = [];
   readonly master: GainNode;
   readonly masterMeter: AnalyserNode;
+  private readonly verb: ConvolverNode;
   private sources: AudioBufferSourceNode[] = [];
   private anchorCtx = 0;
   private anchorT = 0;
@@ -516,6 +570,9 @@ export class MixEngine {
     this.master.connect(pre);
     pre.connect(lim);
     lim.connect(ctx.destination);
+    this.verb = ctx.createConvolver();
+    this.verb.buffer = makeReverbImpulse(ctx, 2.2);
+    this.verb.connect(this.master);
     for (let i = 0; i < CHANNELS; i++) {
       const input = ctx.createGain();
       const fader = ctx.createGain();
@@ -525,22 +582,26 @@ export class MixEngine {
       const merge = ctx.createChannelMerger(2);
       const gl = ctx.createGain();
       const gr = ctx.createGain();
-      gl.gain.value = 0;
-      gr.gain.value = 0;
-      const ctl = ctx.createConstantSource();
-      ctl.offset.value = 0;
-      const shL = ctx.createWaveShaper();
-      shL.curve = balanceCurve('L');
-      const shR = ctx.createWaveShaper();
-      shR.curve = balanceCurve('R');
-      ctl.connect(shL);
-      ctl.connect(shR);
-      shL.connect(gl.gain);
-      shR.connect(gr.gain);
-      ctl.start();
+      gl.gain.value = 1;
+      gr.gain.value = 1;
       const meter = ctx.createAnalyser();
       meter.fftSize = 512;
-      input.connect(fader);
+      const lo = ctx.createBiquadFilter();
+      const mid = ctx.createBiquadFilter();
+      const hi = ctx.createBiquadFilter();
+      lo.type = 'lowshelf';
+      lo.frequency.value = 120;
+      mid.type = 'peaking';
+      mid.frequency.value = 1000;
+      mid.Q.value = 0.9;
+      hi.type = 'highshelf';
+      hi.frequency.value = 6000;
+      const send = ctx.createGain();
+      send.gain.value = 0;
+      input.connect(lo);
+      lo.connect(mid);
+      mid.connect(hi);
+      hi.connect(fader);
       fader.connect(split);
       split.connect(gl, 0);
       split.connect(gr, 1);
@@ -549,7 +610,9 @@ export class MixEngine {
       merge.connect(gate);
       gate.connect(meter);
       gate.connect(this.master);
-      this.nodes.push({ input, fader, pan: ctl.offset, gate, meter });
+      gate.connect(send);
+      send.connect(this.verb);
+      this.nodes.push({ input, fader, panL: gl.gain, panR: gr.gain, gate, lo, mid, hi, send, meter });
     }
   }
 
@@ -598,23 +661,70 @@ export class MixEngine {
     }
   }
 
-  /** (Re)apply fader, pan, mute and solo of one channel from the playhead onward. */
-  applyChannel(s: Session, i: number, only?: AutoTarget) {
+  /** (Re)apply fader, pan, sound shaping, mute and solo of one channel from the playhead onward. */
+  applyChannel(s: Session, i: number, only?: AutoTarget, skipGates = false) {
     const ch = s.channels[i];
     const n = this.nodes[i];
     const t = this.time;
     if (!only || only === 'vol') this.schedule(n.fader.gain, ch.autoVol, ch.vol, faderToGain, this.usesAuto(ch, ch.autoVol, `${i}:vol`), t);
-    if (!only || only === 'pan') this.schedule(n.pan, ch.autoPan, ch.pan, (v) => clamp(v, -1, 1), this.usesAuto(ch, ch.autoPan, `${i}:pan`), t);
-    if (!only) {
-      const anySolo = s.channels.some((c) => c.solo);
-      const audible = !ch.mute && (!anySolo || ch.solo);
-      n.gate.gain.cancelScheduledValues(this.render ? 0 : this.ctx.currentTime);
-      n.gate.gain.setTargetAtTime(audible ? 1 : 0, this.render ? 0 : this.ctx.currentTime, 0.01);
+    if (!only || only === 'pan') {
+      // balance: the centre leaves both sides alone, moving off-centre turns the far side down
+      const useP = this.usesAuto(ch, ch.autoPan, `${i}:pan`);
+      this.schedule(n.panL, ch.autoPan, ch.pan, (v) => Math.min(1, 1 - clamp(v, -1, 1)), useP, t);
+      this.schedule(n.panR, ch.autoPan, ch.pan, (v) => Math.min(1, 1 + clamp(v, -1, 1)), useP, t);
     }
+    if (!only) {
+      const at = this.render ? 0 : this.ctx.currentTime;
+      n.lo.gain.setTargetAtTime(clamp(ch.eq.low, -EQ_MAX, EQ_MAX), at, 0.02);
+      n.mid.gain.setTargetAtTime(clamp(ch.eq.mid, -EQ_MAX, EQ_MAX), at, 0.02);
+      n.hi.gain.setTargetAtTime(clamp(ch.eq.high, -EQ_MAX, EQ_MAX), at, 0.02);
+      n.send.gain.setTargetAtTime(clamp(ch.reverb, 0, 1) * 0.8, at, 0.02);
+    }
+    if (!skipGates && (!only || only === 'mute' || only === 'solo')) this.applyGates(s);
+  }
+
+  private muteOf(s: Session, i: number, t: number) {
+    const c = s.channels[i];
+    return (this.usesAuto(c, c.autoMute, `${i}:mute`) ? stepAt(c.autoMute, t, 0) >= 0.5 : c.mute);
+  }
+
+  private soloOf(s: Session, i: number, t: number) {
+    const c = s.channels[i];
+    return (this.usesAuto(c, c.autoSolo, `${i}:solo`) ? stepAt(c.autoSolo, t, 0) >= 0.5 : c.solo);
+  }
+
+  /** Mute and solo for every channel together, because one solo changes all the others. */
+  private applyGates(s: Session) {
+    const from = this.time;
+    const at = this.render ? 0 : this.ctx.currentTime;
+    const times: number[] = [];
+    s.channels.forEach((c, i) => {
+      if (this.usesAuto(c, c.autoMute, `${i}:mute`)) for (const p of c.autoMute) if (p.t > from) times.push(p.t);
+      if (this.usesAuto(c, c.autoSolo, `${i}:solo`)) for (const p of c.autoSolo) if (p.t > from) times.push(p.t);
+    });
+    const uniq = [...new Set(times)].sort((a, b) => a - b).slice(0, 4000);
+    s.channels.forEach((_, i) => {
+      const g = this.nodes[i].gate.gain;
+      const audibleAt = (t: number) => {
+        let anySolo = false;
+        for (let j = 0; j < s.channels.length; j++) if (this.soloOf(s, j, t)) anySolo = true;
+        return !this.muteOf(s, i, t) && (!anySolo || this.soloOf(s, i, t));
+      };
+      g.cancelScheduledValues(at);
+      let cur = audibleAt(from);
+      g.setTargetAtTime(cur ? 1 : 0, at, 0.01);
+      for (const t of uniq) {
+        const v = audibleAt(t + 1e-4);
+        if (v === cur) continue;
+        cur = v;
+        g.setTargetAtTime(v ? 1 : 0, Math.max(at, this.at(t)), 0.005);
+      }
+    });
   }
 
   applyAll(s: Session) {
-    s.channels.forEach((_, i) => this.applyChannel(s, i));
+    s.channels.forEach((_, i) => this.applyChannel(s, i, undefined, true));
+    this.applyGates(s);
     this.master.gain.setTargetAtTime(faderToGain(s.master), this.render ? 0 : this.ctx.currentTime, 0.01);
   }
 
@@ -742,7 +852,8 @@ export function encodeWav(buffer: AudioBuffer): Blob {
 }
 
 export async function renderMixdown(s: Session, buffers: Map<string, AudioBuffer>, rate = 44100): Promise<{ blob: Blob; seconds: number; peak: number }> {
-  const seconds = sessionEnd(s) + 0.4;
+  const tail = s.channels.some((c) => c.reverb > 0) ? 2.4 : 0.4; // room for the echo to fade
+  const seconds = sessionEnd(s) + tail;
   if (seconds > MAX_SECONDS) throw new Error('too long');
   const ctx = new OfflineAudioContext(2, Math.ceil(seconds * rate), rate);
   const engine = new MixEngine(ctx);
@@ -757,6 +868,146 @@ export async function renderMixdown(s: Session, buffers: Map<string, AudioBuffer
     }
   }
   return { blob: encodeWav(out), seconds: out.duration, peak };
+}
+
+/* ------------------------------------------------------------------ */
+/* Waking the phone's audio                                            */
+/* ------------------------------------------------------------------ */
+
+let silentEl: HTMLAudioElement | null = null;
+
+/**
+ * iPhones keep Web Audio asleep until a tap, and older ones also mute it when the side switch is on silent.
+ * Call this from a tap. It sets the "playback" audio session, plays a silent blip, and loops a silent
+ * audio tag, which is the trick that makes older iPhones treat the page like a music player.
+ */
+export async function wakeAudio(ctx: AudioContext): Promise<void> {
+  try {
+    const nav = navigator as Navigator & { audioSession?: { type: string } };
+    if (nav.audioSession) nav.audioSession.type = 'playback';
+  } catch {
+    /* not on this browser */
+  }
+  const resumed = ctx.state === 'running' ? Promise.resolve() : ctx.resume();
+  try {
+    const s = ctx.createBufferSource();
+    s.buffer = ctx.createBuffer(1, 1, 22050);
+    s.connect(ctx.destination);
+    s.start(0);
+  } catch {
+    /* fine */
+  }
+  try {
+    if (!silentEl && typeof Audio !== 'undefined') {
+      const n = 800;
+      const view = new DataView(new ArrayBuffer(44 + n));
+      const w = (o: number, str: string) => {
+        for (let i = 0; i < str.length; i++) view.setUint8(o + i, str.charCodeAt(i));
+      };
+      w(0, 'RIFF');
+      view.setUint32(4, 36 + n, true);
+      w(8, 'WAVE');
+      w(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, 8000, true);
+      view.setUint32(28, 8000, true);
+      view.setUint16(32, 1, true);
+      view.setUint16(34, 8, true);
+      w(36, 'data');
+      view.setUint32(40, n, true);
+      for (let i = 0; i < n; i++) view.setUint8(44 + i, 128);
+      const el = new Audio(URL.createObjectURL(new Blob([view.buffer], { type: 'audio/wav' })));
+      el.loop = true;
+      el.setAttribute('playsinline', '');
+      silentEl = el;
+    }
+    if (silentEl && silentEl.paused) void silentEl.play().catch(() => undefined);
+  } catch {
+    /* fine */
+  }
+  await resumed;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Generate: turn everything in the project into one finished song     */
+/* ------------------------------------------------------------------ */
+
+function placeLibraryItem(s: Session, item: LibItem, buf: AudioBuffer): Session {
+  let idx = s.channels.findIndex((c) => c.regions.length === 0);
+  if (idx < 0) idx = CHANNELS - 1;
+  const start = s.channels[idx].regions.length > 0 ? Math.max(...s.channels[idx].regions.map(regionEnd)) : 0;
+  const region: Region = { id: newId(), item: item.id, name: item.name, start, offset: 0, length: buf.duration, gain: 1, fadeIn: 0, fadeOut: 0 };
+  return {
+    ...s,
+    channels: s.channels.map((c, k) =>
+      k === idx ? { ...c, name: /^Ch \d+$/.test(c.name) ? item.name.slice(0, 10) : c.name, regions: [...c.regions, region] } : c,
+    ),
+  };
+}
+
+export type SongResult =
+  | { ok: true; blob: Blob; seconds: number; peak: number; parts: number }
+  | { ok: false; reason: 'empty' | 'long' | 'silent' | 'failed' };
+
+/**
+ * Mix every sound saved for this project (new ones are put on free channels, like the mixer does)
+ * into one stereo WAV, using the same fader, pan and automation settings as the mixer.
+ */
+export async function generateSong(mode: string): Promise<SongResult> {
+  try {
+    let s = loadSession(mode);
+    const lib = readLibrary(mode);
+    const Off =
+      window.OfflineAudioContext || (window as unknown as { webkitOfflineAudioContext: typeof OfflineAudioContext }).webkitOfflineAudioContext;
+    const dctx = new Off(2, 1, 44100);
+    const bufs = new Map<string, AudioBuffer>();
+    const load = async (id: string): Promise<AudioBuffer | null> => {
+      const have = bufs.get(id);
+      if (have) return have;
+      const blob = await getBlob(id);
+      if (!blob) return null;
+      try {
+        const b = await decodeBlob(dctx, blob);
+        if (b.duration > MAX_SECONDS) return null;
+        bufs.set(id, b);
+        return b;
+      } catch {
+        return null;
+      }
+    };
+    const seen = new Set(s.seen);
+    for (const it of lib) {
+      if (seen.has(it.id)) continue;
+      const b = await load(it.id);
+      if (!b) continue;
+      s = placeLibraryItem(s, it, b);
+      seen.add(it.id);
+    }
+    s = { ...s, seen: [...seen] };
+    // keep only regions whose sound we could open
+    let parts = 0;
+    for (const c of s.channels) {
+      for (const r of c.regions) {
+        if (await load(r.item)) parts++;
+      }
+    }
+    if (parts === 0) return { ok: false, reason: 'empty' };
+    if (sessionEnd(s) + 2.4 > MAX_SECONDS) return { ok: false, reason: 'long' };
+    saveSession(mode, s);
+    const out = await renderMixdown(s, bufs);
+    if (out.peak < 0.001) return { ok: false, reason: 'silent' };
+    try {
+      await putBlob(`song-${mode}`, out.blob);
+    } catch {
+      /* the song still plays and can be saved from the next screen */
+    }
+    return { ok: true, blob: out.blob, seconds: out.seconds, peak: out.peak, parts };
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
 }
 
 /** Turn a stored sound into an AudioBuffer. */
